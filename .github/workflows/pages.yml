@@ -1,4 +1,4 @@
-name: Refresh prices and deploy Pages
+name: Refresh prices and deploy Cloudflare Pages
 
 on:
   push:
@@ -10,11 +10,15 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
+  deployments: write
+
+env:
+  # Create a Pages Direct Upload project with this name, or override it with
+  # the CLOUDFLARE_PAGES_PROJECT repository variable.
+  CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || 'chatgpt-business-price-radar' }}
 
 concurrency:
-  group: github-pages
+  group: cloudflare-pages
   cancel-in-progress: true
 
 jobs:
@@ -61,13 +65,7 @@ jobs:
       - name: Locate the previous deployed snapshot
         shell: bash
         run: |
-          owner="${GITHUB_REPOSITORY%%/*}"
-          repo="${GITHUB_REPOSITORY##*/}"
-          if [[ "${repo,,}" == "${owner,,}.github.io" ]]; then
-            url="https://${owner}.github.io/data/prices.json"
-          else
-            url="https://${owner}.github.io/${repo}/data/prices.json"
-          fi
+          url="https://${CLOUDFLARE_PAGES_PROJECT}.pages.dev/data/prices.json"
           echo "PREVIOUS_SNAPSHOT_URL=$url" >> "$GITHUB_ENV"
 
       - name: Probe the OpenAI pricing endpoint
@@ -82,21 +80,10 @@ jobs:
       - name: Type-check and build
         run: npm run build
 
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v4
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v4
         with:
-          path: dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=${{ env.CLOUDFLARE_PAGES_PROJECT }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}

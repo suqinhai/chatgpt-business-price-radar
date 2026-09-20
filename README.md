@@ -80,17 +80,25 @@ Team 优惠生成器默认使用 `US / EGP`、月付、两个席位和工作区�
 - `MIN_FIRST_RUN_ROWS`：首次部署最少行数，默认 `20`。
 - `OUTPUT_PATH`：输出文件，默认 `public/data/prices.json`。
 
-## GitHub Pages 发布
+## Cloudflare Pages 发布
 
-1. 新建 GitHub 仓库并推送本目录内容，默认分支命名为 `main`。
-2. 打开仓库 **Settings → Pages**。
-3. 在 **Build and deployment → Source** 中选择 **GitHub Actions**。
-4. 打开 **Actions → Refresh prices and deploy Pages → Run workflow**，执行首次手动刷新。
-5. 首次成功后，网站会发布到仓库对应的 GitHub Pages 地址。
+工作流 `.github/workflows/pages.yml` 会在构建前采集价格，然后把 `dist` 上传到 Cloudflare Pages。它在北京时间每天 03:17 唤醒，通过日期门控每两天真正刷新一次；主分支推送和手动运行会立即刷新。
 
-工作流还会在北京时间每天 03:17 唤醒，通过日期门控每两天真正刷新一次；主分支推送和手动运行会立即刷新。
+GitHub 可能在公开仓库连续 60 天没有活动后停用定时工作流；如果发生这种情况，请在 Actions 页面重新启用并手动运行一次。
 
-GitHub 可能在公开仓库连续 60 天没有活动后停用定时工作流。本项目按约定不创建保活提交；如被停用，请在 Actions 页面手动重新启用并运行一次。
+首次配置：
+
+1. 在 Cloudflare **Workers & Pages** 中创建一个 **Direct Upload** 项目，默认项目名为 `chatgpt-business-price-radar`。
+2. 创建一个 Cloudflare API Token，授予当前账户的 Pages 编辑权限。
+3. 在 GitHub 仓库 **Settings → Secrets and variables → Actions** 中添加：
+   - `CLOUDFLARE_API_TOKEN`：上一步生成的 API Token。
+   - `CLOUDFLARE_ACCOUNT_ID`：Cloudflare 账户 ID。
+4. 如果 Pages 项目不是默认名称，在同一页面的 **Variables** 中添加 `CLOUDFLARE_PAGES_PROJECT`，值为实际项目名。
+5. 打开 **Actions → Refresh prices and deploy Cloudflare Pages → Run workflow**，执行首次发布。
+
+首次发布前，工作流会从 `https://<项目名>.pages.dev/data/prices.json` 读取上一份快照；如果没有快照，会使用首次覆盖率保护（至少 20 个有效地区）。采价或覆盖率检查失败时不会覆盖线上版本。
+
+Cloudflare Pages 的 Direct Upload 支持通过 Wrangler 和 GitHub Actions 持续部署。静态资源不会消耗 Pages Functions 的请求额度；项目本身不需要 Pages Function。
 
 ## 计费与免责声明
 
