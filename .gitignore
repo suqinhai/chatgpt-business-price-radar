@@ -6,3 +6,6 @@ coverage/
 .DS_Store
 npm-debug.log*
 *.tsbuildinfo
+.wrangler/
+.dev.vars
+_worker.bundle

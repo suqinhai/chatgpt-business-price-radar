@@ -106,6 +106,8 @@ export default function CheckoutGenerator({
   const [notice, setNotice] = useState("");
   const [activationCode, setActivationCode] = useState("");
   const [cdkActivated, setCdkActivated] = useState(false);
+  const [activationBusy, setActivationBusy] = useState(false);
+  const [activationError, setActivationError] = useState("");
   const [regionQuery, setRegionQuery] = useState("");
   const [copied, setCopied] = useState(false);
   const couponRef = useRef<HTMLInputElement>(null);
@@ -238,14 +240,37 @@ export default function CheckoutGenerator({
     setNotice(`${meta.title}已生成`);
   };
 
-  const activateCode = () => {
-    if (!activationCode.trim()) {
+  const activateCode = async () => {
+    const code = activationCode.trim();
+    if (!code) {
       couponRef.current?.focus();
       setNotice("请输入购买获得的 CDK");
       return;
     }
-    setCdkActivated(true);
-    setNotice("CDK 已激活，可以生成支付长链");
+    setActivationBusy(true);
+    setActivationError("");
+    try {
+      const response = await fetch("/api/cdk/activate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const payload = await response.json().catch(() => ({})) as { ok?: boolean; message?: string };
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.message || "CDK 无效、已过期或已使用");
+      }
+      setCdkActivated(true);
+      setNotice("CDK 已激活，可以生成支付长链");
+    } catch (error) {
+      const message = error instanceof Error && error.message !== "Failed to fetch"
+        ? error.message
+        : "CDK 服务暂时不可用，请稍后重试";
+      setCdkActivated(false);
+      setActivationError(message);
+      setNotice(message);
+    } finally {
+      setActivationBusy(false);
+    }
   };
 
   const copyCode = async () => {
@@ -299,6 +324,8 @@ export default function CheckoutGenerator({
     setAccessToken("");
     setActivationCode("");
     setCdkActivated(false);
+    setActivationBusy(false);
+    setActivationError("");
     setErrors({});
     setNotice("已恢复当前生成器的默认值");
   };
@@ -390,14 +417,20 @@ export default function CheckoutGenerator({
             <input
               id="activation-cdk"
               value={activationCode}
-              onChange={(event) => setActivationCode(event.target.value)}
+              onChange={(event) => {
+                setActivationCode(event.target.value);
+                setCdkActivated(false);
+                setActivationError("");
+              }}
               placeholder="CDK-XXXX-XXXX-XXXX"
               autoComplete="off"
               spellCheck={false}
+              aria-invalid={Boolean(activationError)}
             />
-            <button type="button" onClick={activateCode}>激活 CDK</button>
+            <button type="button" onClick={activateCode} disabled={activationBusy}>{activationBusy ? "验证中…" : "激活 CDK"}</button>
           </div>
           <small>未激活时可以查看价格，但不能生成支付长链</small>
+          {activationError ? <em className="activation-error" role="alert">{activationError}</em> : null}
         </div>
       </section>
 

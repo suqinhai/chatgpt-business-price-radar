@@ -10,6 +10,7 @@
     "dev": "vite",
     "probe": "node scripts/collect-prices.mjs --probe US",
     "collect": "node scripts/collect-prices.mjs",
+    "cdk:issue": "node scripts/issue-cdks.mjs",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",

@@ -368,7 +368,9 @@ footer > span:last-child { text-align: right; }
 .activation-input-row input::placeholder { color: #8e9b93; font-weight: 500; }
 .activation-input-row button { align-self: stretch; padding: 0 20px; border: 0; background: var(--green); color: #fff; font-size: 11px; font-weight: 800; cursor: pointer; }
 .activation-input-row button:hover { background: var(--green-dark); }
+.activation-input-row button:disabled { background: #9eb7a8; cursor: wait; }
 .activation-form > small { display: block; margin-top: 7px; color: #87938c; font-size: 9px; }
+.activation-error { display: block; margin-top: 7px; color: #a74338; font-size: 10px; font-style: normal; }
 .screenshot-generator-page .generator-tool-tabs { margin-bottom: 12px; }
 .screenshot-generator-page .generator-tool-tabs button { padding: 10px 14px; border-radius: 10px; background: rgba(255,255,255,.56); }
 .screenshot-generator-page .generator-tool-tabs button.active { background: var(--green); }
