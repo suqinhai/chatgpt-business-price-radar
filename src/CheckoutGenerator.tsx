@@ -6,6 +6,10 @@ import {
   CreditCard,
   Download,
   Info,
+  KeyRound,
+  LockKeyhole,
+  MapPin,
+  Search,
   ReceiptText,
   RotateCcw,
   ShieldCheck,
@@ -35,6 +39,7 @@ import {
   type CodexScriptInput,
   type GeneratorTool,
 } from "./script-generators";
+import { flagEmoji, formatLocal } from "./lib";
 import type { PriceRow } from "./types";
 
 type CheckoutGeneratorProps = {
@@ -99,6 +104,9 @@ export default function CheckoutGenerator({
   const [accessToken, setAccessToken] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
   const [notice, setNotice] = useState("");
+  const [activationCode, setActivationCode] = useState("");
+  const [cdkActivated, setCdkActivated] = useState(false);
+  const [regionQuery, setRegionQuery] = useState("");
   const [copied, setCopied] = useState(false);
   const couponRef = useRef<HTMLInputElement>(null);
   const countryRef = useRef<HTMLInputElement>(null);
@@ -189,6 +197,13 @@ export default function CheckoutGenerator({
   const currencyName = CHECKOUT_CURRENCIES.find(([code]) => code === checkoutInput.currency)?.[1];
   const selectedCodexCountry = CODEX_COUNTRIES.find(([code]) => code === codexCountry) || CODEX_COUNTRIES[0];
   const meta = toolMeta[activeTool];
+  const regionRows = useMemo(() => {
+    const needle = regionQuery.trim().toLowerCase();
+    return countries
+      .filter((row) => isSupportedCheckoutCurrency(row.currencyCode))
+      .filter((row) => !needle || `${row.countryName} ${row.countryCode} ${row.currencyCode}`.toLowerCase().includes(needle))
+      .slice(0, 9);
+  }, [countries, regionQuery]);
 
   const clearError = (field: FormField) => {
     if (!errors[field]) return;
@@ -221,6 +236,16 @@ export default function CheckoutGenerator({
     }
     document.querySelector("#script-result")?.scrollIntoView({ behavior: "smooth", block: "start" });
     setNotice(`${meta.title}已生成`);
+  };
+
+  const activateCode = () => {
+    if (!activationCode.trim()) {
+      couponRef.current?.focus();
+      setNotice("请输入购买获得的 CDK");
+      return;
+    }
+    setCdkActivated(true);
+    setNotice("CDK 已激活，可以生成支付长链");
   };
 
   const copyCode = async () => {
@@ -272,6 +297,8 @@ export default function CheckoutGenerator({
     setAutoOpen(false);
     setAccessTokenMode(DEFAULT_ACCESS_TOKEN_MODE);
     setAccessToken("");
+    setActivationCode("");
+    setCdkActivated(false);
     setErrors({});
     setNotice("已恢复当前生成器的默认值");
   };
@@ -337,17 +364,40 @@ export default function CheckoutGenerator({
   );
 
   return (
-    <div className="generator-page">
+    <div className="generator-page screenshot-generator-page">
       <section className="generator-hero">
         <div>
           <button className="back-link" type="button" onClick={onBack}><ArrowLeft size={15} /> 返回价格雷达</button>
-          <span className="eyebrow"><Code2 size={15} /> BUSINESS TOOL · GENERATOR</span>
-          <h1>选择工具，<br /><em>脚本即刻就绪。</em></h1>
-          <p>生成 Team 优惠、Codex 按量和账单查询脚本。网站只生成文本，不会代替你请求账户或支付接口。</p>
+          <span className="eyebrow"><Code2 size={15} /> BUSINESS TOOLKIT · LONG LINK</span>
+          <h1>Business <em>长链生成</em></h1>
+          <p>查询 ChatGPT Business 地区价格，并通过服务端生成与所选地区匹配的支付链接。</p>
         </div>
         <div className="generator-promise">
-          <ShieldCheck size={22} />
-          <div><strong>本地生成</strong><span>不上传、不保存优惠码、空间信息或 Access Token。</span></div>
+          <MapPin size={22} />
+          <div><strong>按地区匹配</strong><span>先选开通地区，再核对支付信息与最终金额。</span></div>
+        </div>
+      </section>
+
+      <section className="activation-card" aria-labelledby="activation-title">
+        <div className="activation-copy">
+          <span className="activation-kicker">激活生成权限</span>
+          <strong id="activation-title">使用购买获得的一次性 CDK</strong>
+        </div>
+        <div className="activation-form">
+          <label htmlFor="activation-cdk">CDK</label>
+          <div className="activation-input-row">
+            <KeyRound size={17} aria-hidden="true" />
+            <input
+              id="activation-cdk"
+              value={activationCode}
+              onChange={(event) => setActivationCode(event.target.value)}
+              placeholder="CDK-XXXX-XXXX-XXXX"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <button type="button" onClick={activateCode}>激活 CDK</button>
+          </div>
+          <small>未激活时可以查看价格，但不能生成支付长链</small>
         </div>
       </section>
 
@@ -359,20 +409,45 @@ export default function CheckoutGenerator({
 
       <section className="generator-workspace" aria-labelledby="generator-title">
         <div className="generator-form-panel">
-          <div className="generator-section-head">
-            <div><span className="section-kicker">INPUT PARAMETERS</span><h2 id="generator-title">{meta.title}</h2></div>
-            <span className="live-preview"><span /> 实时预览</span>
+          <div className="generator-section-head region-section-head">
+            <div><span className="section-kicker">REGION PRICING</span><h2 id="generator-title">{activeTool === "checkout" ? "选择开通地区" : meta.title}</h2></div>
+            <span className="service-pill">服务端价格</span>
           </div>
           <p className="tool-description">{meta.description}</p>
 
+          {activeTool === "checkout" ? (
+            <div className="region-picker" aria-label="常用地区">
+              <div className="region-picker-grid">
+                {regionRows.map((row) => (
+                  <button
+                    className={`region-card ${country.toUpperCase() === row.countryCode ? "active" : ""}`}
+                    key={row.countryCode}
+                    type="button"
+                    onClick={() => {
+                      setCountry(row.countryCode);
+                      setCurrency(row.currencyCode);
+                      clearError("country");
+                      clearError("currency");
+                    }}
+                  >
+                    <span>{flagEmoji(row.countryCode)} {row.countryName}</span>
+                    <strong>{formatLocal(row)}</strong>
+                    <small>{row.currencyCode} · {row.countryCode}</small>
+                  </button>
+                ))}
+              </div>
+              <label className="region-search">
+                <Search size={15} aria-hidden="true" />
+                <span className="sr-only">搜索地区</span>
+                <input value={regionQuery} onChange={(event) => setRegionQuery(event.target.value)} placeholder="搜索国家或地区" list="checkout-country-list" />
+                <span>更多</span>
+              </label>
+            </div>
+          ) : null}
+
           <form onSubmit={handleGenerate} noValidate>
-            {activeTool === "checkout" ? (
-              <>
-                <label className={`generator-field ${errors.coupon ? "has-error" : ""}`}>
-                  <span><strong>优惠码</strong><small>必填</small></span>
-                  <input ref={couponRef} value={coupon} onChange={(event) => { setCoupon(event.target.value); clearError("coupon"); }} placeholder="例如：XXXXXXXXXXXX" autoComplete="off" spellCheck={false} aria-invalid={Boolean(errors.coupon)} />
-                  {errors.coupon ? <em role="alert">{errors.coupon}</em> : null}
-                </label>
+             {activeTool === "checkout" ? (
+               <>
                 <label className={`generator-field ${errors.existingWorkspaceId ? "has-error" : ""}`}>
                   <span><strong>已有 Codex 空间 ID</strong><small>可选</small></span>
                   <input ref={workspaceIdRef} value={existingWorkspaceId} onChange={(event) => { setExistingWorkspaceId(event.target.value.trim()); clearError("existingWorkspaceId"); }} placeholder="填写 UUID 则应用到已有空间；留空则新建" autoComplete="off" spellCheck={false} aria-invalid={Boolean(errors.existingWorkspaceId)} />
@@ -444,8 +519,41 @@ export default function CheckoutGenerator({
         </div>
 
         <div className="generator-result-panel" id="script-result">
+          <div className="direct-link-panel">
+            <div className="generator-section-head result-head">
+              <div><span className="section-kicker">CHECKOUT OUTPUT</span><h2>直接生成支付链接</h2></div>
+              <span className="live-preview"><span /> 实时校验</span>
+            </div>
+            {activeTool === "checkout" ? (
+              <>
+                <label className="direct-field">
+                  <span><b>*</b> Business 优惠码</span>
+                  <div><KeyRound size={16} aria-hidden="true" /><input ref={couponRef} value={coupon} onChange={(event) => { setCoupon(event.target.value); clearError("coupon"); }} placeholder="例如：XXXXXXXXXXXX" autoComplete="off" spellCheck={false} aria-invalid={Boolean(errors.coupon)} /></div>
+                  {errors.coupon ? <em role="alert">{errors.coupon}</em> : null}
+                </label>
+                <div className="access-help">
+                  <strong>怎么获取 Access Token?</strong>
+                  <ol>
+                    <li>先在同一浏览器登录 ChatGPT。</li>
+                    <li>打开 <code>chatgpt.com/api/auth/session</code>。</li>
+                    <li>复制其中的 <code>accessToken</code>，或复制整页 JSON。</li>
+                  </ol>
+                </div>
+              </>
+            ) : null}
+            <div className="direct-token-slot">
+              <span className="direct-token-label">{accessTokenMode === "manual" ? "Access Token 或 Session JSON" : "Access Token 来源"}</span>
+              {accessTokenMode === "manual" ? (
+                <textarea value={accessToken} onChange={(event) => { setAccessToken(event.target.value); clearError("accessToken"); }} placeholder="粘贴 Access Token，或完整 Session JSON" autoComplete="off" spellCheck={false} />
+              ) : (
+                <div className="token-mode-summary"><ShieldCheck size={15} /> 自动获取登录 Session <button type="button" onClick={() => { setAccessTokenMode("manual"); clearError("accessToken"); }}>改为手动粘贴</button></div>
+              )}
+            </div>
+            <button className="direct-generate-button" type="button" disabled={!cdkActivated} onClick={() => handleGenerate({ preventDefault: () => undefined } as React.FormEvent)}><LockKeyhole size={16} /> {cdkActivated ? "生成支付链接" : "激活 CDK 后生成"}</button>
+          </div>
+          <div className="legacy-output">
           <div className="generator-section-head result-head">
-            <div><span className="section-kicker">OUTPUT</span><h2>JavaScript</h2></div>
+            <div><span className="section-kicker">LOCAL OUTPUT</span><h2>JavaScript</h2></div>
             <div className="code-actions">
               <button type="button" onClick={downloadCode} aria-disabled={!isInputValid}><Download size={14} /> 下载</button>
               <button className="copy-code" type="button" onClick={copyCode} aria-disabled={!isInputValid}>{copied ? <Check size={14} /> : <Copy size={14} />} {copied ? "已复制" : "复制代码"}</button>
@@ -458,6 +566,7 @@ export default function CheckoutGenerator({
           <div className="result-meta">
             <span><Info size={13} /> 在已登录 ChatGPT 的页面控制台中运行</span>
             <button type="button" onClick={reset}><RotateCcw size={13} /> 恢复默认值</button>
+            </div>
           </div>
         </div>
       </section>
