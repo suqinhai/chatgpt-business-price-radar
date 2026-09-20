@@ -8,11 +8,13 @@ import {
   Database,
   Github,
   Info,
+  KeyRound,
   Search,
   ShieldCheck,
   Users,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import CdkAdmin from "./CdkAdmin";
 import CheckoutGenerator from "./CheckoutGenerator";
 import {
   DEFAULT_CHECKOUT_COUNTRY,
@@ -32,13 +34,14 @@ import type {
 
 const currencyStorageKey = "business-price-radar:currency";
 
-type AppView = "prices" | "generator";
+type AppView = "prices" | "generator" | "admin";
 type AppRoute = { view: AppView; tool: GeneratorTool; country: string; currency: string };
 
 function readRoute(): AppRoute {
   const params = new URLSearchParams(window.location.search);
+  const requestedView = params.get("view");
   return {
-    view: params.get("view") === "generator" ? "generator" : "prices",
+    view: requestedView === "generator" || requestedView === "admin" ? requestedView : "prices",
     tool: "checkout",
     country: params.get("country")?.toUpperCase() || DEFAULT_CHECKOUT_COUNTRY,
     currency: params.get("currency")?.toUpperCase() || DEFAULT_CHECKOUT_CURRENCY,
@@ -147,6 +150,11 @@ export default function App() {
         url.searchParams.delete("country");
         url.searchParams.delete("currency");
       }
+    } else if (nextView === "admin") {
+      url.searchParams.set("view", "admin");
+      url.searchParams.delete("country");
+      url.searchParams.delete("currency");
+      url.searchParams.delete("tool");
     } else {
       url.searchParams.delete("view");
       url.searchParams.delete("country");
@@ -177,9 +185,15 @@ export default function App() {
           <button className={route.view === "generator" ? "active" : ""} type="button" onClick={() => navigate("generator")}>
             <Code2 size={15} /> 脚本生成器
           </button>
+          <button className={route.view === "admin" ? "active" : ""} type="button" onClick={() => navigate("admin")}>
+            <KeyRound size={15} /> CDK 管理
+          </button>
         </nav>
         <div className="topbar-actions">
           {route.view === "prices" ? <span className="source-pill"><span className="live-dot" /> OpenAI 公开配置</span> : null}
+          <button className={`admin-nav-button ${route.view === "admin" ? "active" : ""}`} type="button" onClick={() => navigate(route.view === "admin" ? "prices" : "admin")}>
+            <KeyRound size={15} /> {route.view === "admin" ? "返回价格雷达" : "CDK 管理"}
+          </button>
           <a
             className="github-badge ui-hidden-control"
             href="https://github.com/zhangkaihua88/chatgpt-business-price-radar"
@@ -365,7 +379,7 @@ export default function App() {
           </p>
         </section>
           </>
-        ) : (
+        ) : route.view === "generator" ? (
           <CheckoutGenerator
             initialTool={route.tool}
             initialCountry={route.country}
@@ -374,6 +388,8 @@ export default function App() {
             onBack={() => navigate("prices")}
             onToolChange={(tool) => navigate("generator", undefined, tool)}
           />
+        ) : (
+          <CdkAdmin onBack={() => navigate("prices")} />
         )}
       </main>
 
