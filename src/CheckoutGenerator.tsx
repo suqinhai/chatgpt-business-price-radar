@@ -3,22 +3,17 @@ import {
   Check,
   Code2,
   Copy,
-  CreditCard,
   Download,
+  ExternalLink,
   Info,
   KeyRound,
   LockKeyhole,
   MapPin,
-  Search,
-  ReceiptText,
   RotateCcw,
-  ShieldCheck,
-  Sparkles,
-  Users,
+  Search,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  CHECKOUT_CURRENCIES,
   DEFAULT_ACCESS_TOKEN_MODE,
   DEFAULT_CHECKOUT_COUNTRY,
   DEFAULT_CHECKOUT_CURRENCY,
@@ -29,17 +24,8 @@ import {
   type AccessTokenMode,
   type CheckoutScriptInput,
 } from "./checkout-generator";
-import {
-  CODEX_COUNTRIES,
-  generateBillingScript,
-  generateCodexScript,
-  validateBillingInput,
-  validateCodexInput,
-  type BillingScriptInput,
-  type CodexScriptInput,
-  type GeneratorTool,
-} from "./script-generators";
-import { flagEmoji, formatLocal } from "./lib";
+import type { GeneratorTool } from "./script-generators";
+import { formatLocal } from "./lib";
 import type { PriceRow } from "./types";
 
 type CheckoutGeneratorProps = {
@@ -51,54 +37,35 @@ type CheckoutGeneratorProps = {
   onToolChange: (tool: GeneratorTool) => void;
 };
 
-type FormField =
-  | "coupon"
-  | "country"
-  | "currency"
-  | "existingWorkspaceId"
-  | "accessToken"
-  | "workspaceName"
-  | "creditQuantity";
+type FormField = "coupon" | "country" | "currency" | "existingWorkspaceId" | "accessToken";
 type FormErrors = Partial<Record<FormField, string>>;
 
-const commonCurrencies = ["USD", "EUR", "GBP", "SGD", "EGP"];
-const toolMeta: Record<GeneratorTool, { title: string; description: string; filename: string; codeTitle: string }> = {
-  checkout: {
-    title: "Team 优惠长链",
-    description: "使用优惠码新建 Team 空间，或将优惠应用到已有 Codex 空间。",
-    filename: "chatgpt-team-checkout.js",
-    codeTitle: "team-checkout.js",
-  },
-  codex: {
-    title: "Codex 按量长链",
-    description: "按空间名称和 Credit 数量生成 Codex usage-based checkout。",
-    filename: "chatgpt-codex-usage-checkout.js",
-    codeTitle: "codex-usage-checkout.js",
-  },
-  billing: {
-    title: "账单查询脚本",
-    description: "查询账户、最近 10 条发票、支付方式和账单资料。",
-    filename: "chatgpt-billing-query.js",
-    codeTitle: "billing-query.js",
-  },
+const formatUsd = (amount: number) => `$${new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+}).format(amount)}`;
+
+const formatDate = (value?: string) => {
+  const date = value ? new Date(value) : new Date();
+  if (!Number.isFinite(date.getTime())) return "实时更新";
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
 };
 
 export default function CheckoutGenerator({
-  initialTool = "checkout",
   initialCountry = DEFAULT_CHECKOUT_COUNTRY,
   initialCurrency = DEFAULT_CHECKOUT_CURRENCY,
   countries,
   onBack,
   onToolChange,
 }: CheckoutGeneratorProps) {
-  const [activeTool, setActiveTool] = useState<GeneratorTool>(initialTool);
   const [coupon, setCoupon] = useState("");
   const [country, setCountry] = useState(initialCountry);
   const [currency, setCurrency] = useState(initialCurrency);
   const [existingWorkspaceId, setExistingWorkspaceId] = useState("");
-  const [workspaceName, setWorkspaceName] = useState("work");
-  const [creditQuantity, setCreditQuantity] = useState("13");
-  const [codexCountry, setCodexCountry] = useState("US");
   const [autoOpen, setAutoOpen] = useState(false);
   const [accessTokenMode, setAccessTokenMode] = useState<AccessTokenMode>(DEFAULT_ACCESS_TOKEN_MODE);
   const [accessToken, setAccessToken] = useState("");
@@ -108,22 +75,23 @@ export default function CheckoutGenerator({
   const [cdkActivated, setCdkActivated] = useState(false);
   const [activationBusy, setActivationBusy] = useState(false);
   const [activationError, setActivationError] = useState("");
-  const [regionQuery, setRegionQuery] = useState("");
+  const [generated, setGenerated] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  const activationRef = useRef<HTMLInputElement>(null);
   const couponRef = useRef<HTMLInputElement>(null);
+  const visibleCouponRef = useRef<HTMLInputElement>(null);
   const countryRef = useRef<HTMLInputElement>(null);
   const currencyRef = useRef<HTMLInputElement>(null);
   const workspaceIdRef = useRef<HTMLInputElement>(null);
-  const workspaceNameRef = useRef<HTMLInputElement>(null);
-  const creditQuantityRef = useRef<HTMLInputElement>(null);
   const accessTokenRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => setActiveTool(initialTool), [initialTool]);
+  const visibleTokenRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     setCountry(initialCountry || DEFAULT_CHECKOUT_COUNTRY);
     setCurrency(initialCurrency || DEFAULT_CHECKOUT_CURRENCY);
     setErrors({});
+    setGenerated(false);
   }, [initialCountry, initialCurrency]);
 
   useEffect(() => {
@@ -132,47 +100,37 @@ export default function CheckoutGenerator({
     return () => window.clearTimeout(timer);
   }, [notice]);
 
-  const tokenInput = { accessTokenMode, accessToken: accessToken.trim() };
+  const pricedCountries = useMemo(
+    () => [...countries]
+      .filter((row) => isSupportedCheckoutCurrency(row.currencyCode))
+      .sort((a, b) => a.usdAmount - b.usdAmount || a.countryName.localeCompare(b.countryName, "zh-CN")),
+    [countries],
+  );
+
+  const commonCountries = pricedCountries.slice(0, 9);
+  const selectedCountry = useMemo(
+    () => pricedCountries.find((row) => row.countryCode === country.toUpperCase() && row.currencyCode === currency.toUpperCase())
+      || pricedCountries.find((row) => row.currencyCode === currency.toUpperCase())
+      || pricedCountries.find((row) => row.countryCode === country.toUpperCase())
+      || pricedCountries[0],
+    [country, currency, pricedCountries],
+  );
+
   const checkoutInput: CheckoutScriptInput = {
     coupon: coupon.trim(),
-    country: country.toUpperCase(),
-    currency: currency.toUpperCase(),
+    country: selectedCountry?.countryCode || country.toUpperCase(),
+    currency: selectedCountry?.currencyCode || currency.toUpperCase(),
     existingWorkspaceId: existingWorkspaceId.trim(),
     autoOpen,
-    ...tokenInput,
-  };
-  const codexInput: CodexScriptInput = {
-    workspaceName: workspaceName.trim(),
-    creditQuantity: Number(creditQuantity),
-    country: codexCountry,
-    autoOpen,
-    ...tokenInput,
-  };
-  const billingInput: BillingScriptInput = tokenInput;
-
-  const currentErrors = (): FormErrors => {
-    if (activeTool === "checkout") return validateCheckoutInput(checkoutInput);
-    if (activeTool === "codex") return validateCodexInput(codexInput);
-    return validateBillingInput(billingInput);
+    accessTokenMode,
+    accessToken: accessToken.trim(),
   };
 
+  const currentErrors = () => validateCheckoutInput(checkoutInput);
   const source = useMemo(() => {
     const previewToken = accessTokenMode === "manual"
       ? accessToken.trim() || "PASTE_ACCESS_TOKEN_HERE"
       : "";
-    if (activeTool === "billing") {
-      return generateBillingScript({ accessTokenMode, accessToken: previewToken });
-    }
-    if (activeTool === "codex") {
-      return generateCodexScript({
-        ...codexInput,
-        workspaceName: codexInput.workspaceName || "work",
-        creditQuantity: Number.isInteger(codexInput.creditQuantity) && codexInput.creditQuantity > 0
-          ? codexInput.creditQuantity
-          : 13,
-        accessToken: previewToken,
-      });
-    }
     return generateCheckoutScript({
       ...checkoutInput,
       coupon: checkoutInput.coupon || "XXXXXXXXXXXX",
@@ -181,69 +139,70 @@ export default function CheckoutGenerator({
       existingWorkspaceId: currentErrors().existingWorkspaceId ? "" : checkoutInput.existingWorkspaceId,
       accessToken: previewToken,
     });
-  }, [
-    activeTool,
-    coupon,
-    country,
-    currency,
-    existingWorkspaceId,
-    workspaceName,
-    creditQuantity,
-    codexCountry,
-    autoOpen,
-    accessTokenMode,
-    accessToken,
-  ]);
+  }, [coupon, country, currency, existingWorkspaceId, autoOpen, accessTokenMode, accessToken, selectedCountry?.countryCode, selectedCountry?.currencyCode]);
 
   const isInputValid = Object.keys(currentErrors()).length === 0;
-  const currencyName = CHECKOUT_CURRENCIES.find(([code]) => code === checkoutInput.currency)?.[1];
-  const selectedCodexCountry = CODEX_COUNTRIES.find(([code]) => code === codexCountry) || CODEX_COUNTRIES[0];
-  const meta = toolMeta[activeTool];
-  const regionRows = useMemo(() => {
-    const needle = regionQuery.trim().toLowerCase();
-    return countries
-      .filter((row) => isSupportedCheckoutCurrency(row.currencyCode))
-      .filter((row) => !needle || `${row.countryName} ${row.countryCode} ${row.currencyCode}`.toLowerCase().includes(needle))
-      .slice(0, 9);
-  }, [countries, regionQuery]);
 
   const clearError = (field: FormField) => {
     if (!errors[field]) return;
     setErrors((current) => ({ ...current, [field]: undefined }));
   };
 
-  const focusField = (field: FormField) => {
-    if (field === "coupon") couponRef.current?.focus();
+  const chooseCountry = (row: PriceRow) => {
+    setCountry(row.countryCode);
+    setCurrency(row.currencyCode);
+    setGenerated(false);
+    clearError("country");
+    clearError("currency");
+  };
+
+  const focusField = (field: FormField, legacy = false) => {
+    if (field === "coupon") (legacy ? couponRef.current : visibleCouponRef.current)?.focus();
     if (field === "country") countryRef.current?.focus();
     if (field === "currency") currencyRef.current?.focus();
     if (field === "existingWorkspaceId") workspaceIdRef.current?.focus();
-    if (field === "workspaceName") workspaceNameRef.current?.focus();
-    if (field === "creditQuantity") creditQuantityRef.current?.focus();
-    if (field === "accessToken") accessTokenRef.current?.focus();
+    if (field === "accessToken") (legacy ? accessTokenRef.current : visibleTokenRef.current)?.focus();
   };
 
-  const validateAndFocus = () => {
+  const validateAndFocus = (legacy = false) => {
     const nextErrors = currentErrors();
     setErrors(nextErrors);
     const firstError = Object.keys(nextErrors)[0] as FormField | undefined;
-    if (firstError) focusField(firstError);
+    if (firstError) focusField(firstError, legacy);
     return !firstError;
   };
 
-  const handleGenerate = (event: React.FormEvent) => {
-    event.preventDefault();
+  const handleGenerate = () => {
+    if (!cdkActivated) {
+      activationRef.current?.focus();
+      setNotice("请先激活 CDK");
+      return;
+    }
+    if (!coupon.trim()) {
+      setErrors((current) => ({ ...current, coupon: "请输入优惠码" }));
+      visibleCouponRef.current?.focus();
+      setNotice("请填写 Business 优惠码");
+      return;
+    }
+    if (!accessToken.trim()) {
+      setAccessTokenMode("manual");
+      setErrors((current) => ({ ...current, accessToken: "请输入 Access Token 或 Session JSON" }));
+      visibleTokenRef.current?.focus();
+      setNotice("请填写 Access Token 或 Session JSON");
+      return;
+    }
     if (!validateAndFocus()) {
       setNotice("请检查标红的参数");
       return;
     }
-    document.querySelector("#script-result")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    setNotice(`${meta.title}已生成`);
+    setGenerated(true);
+    setNotice("支付链接脚本已生成");
   };
 
   const activateCode = async () => {
     const code = activationCode.trim();
     if (!code) {
-      couponRef.current?.focus();
+      activationRef.current?.focus();
       setNotice("请输入购买获得的 CDK");
       return;
     }
@@ -256,9 +215,7 @@ export default function CheckoutGenerator({
         body: JSON.stringify({ code }),
       });
       const payload = await response.json().catch(() => ({})) as { ok?: boolean; message?: string };
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.message || "CDK 无效、已过期或已使用");
-      }
+      if (!response.ok || !payload.ok) throw new Error(payload.message || "CDK 无效、已过期或已使用");
       setCdkActivated(true);
       setNotice("CDK 已激活，可以生成支付长链");
     } catch (error) {
@@ -274,7 +231,7 @@ export default function CheckoutGenerator({
   };
 
   const copyCode = async () => {
-    if (!validateAndFocus()) {
+    if (!validateAndFocus(true)) {
       setNotice("请先完成必填参数");
       return;
     }
@@ -297,7 +254,7 @@ export default function CheckoutGenerator({
   };
 
   const downloadCode = () => {
-    if (!validateAndFocus()) {
+    if (!validateAndFocus(true)) {
       setNotice("请先完成必填参数");
       return;
     }
@@ -305,7 +262,7 @@ export default function CheckoutGenerator({
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = meta.filename;
+    link.download = "chatgpt-team-checkout.js";
     link.click();
     URL.revokeObjectURL(url);
     setNotice("代码文件已下载");
@@ -316,9 +273,6 @@ export default function CheckoutGenerator({
     setCountry(DEFAULT_CHECKOUT_COUNTRY);
     setCurrency(DEFAULT_CHECKOUT_CURRENCY);
     setExistingWorkspaceId("");
-    setWorkspaceName("work");
-    setCreditQuantity("13");
-    setCodexCountry("US");
     setAutoOpen(false);
     setAccessTokenMode(DEFAULT_ACCESS_TOKEN_MODE);
     setAccessToken("");
@@ -326,69 +280,10 @@ export default function CheckoutGenerator({
     setCdkActivated(false);
     setActivationBusy(false);
     setActivationError("");
+    setGenerated(false);
     setErrors({});
-    setNotice("已恢复当前生成器的默认值");
+    setNotice("已恢复默认值");
   };
-
-  const changeTool = (tool: GeneratorTool) => {
-    if (tool === activeTool) return;
-    setActiveTool(tool);
-    setErrors({});
-    setCopied(false);
-    onToolChange(tool);
-  };
-
-  const renderTokenFields = () => (
-    <>
-      <fieldset className="token-source-field">
-        <legend>Access Token 来源</legend>
-        <div className="token-source-options">
-          <label className={accessTokenMode === "auto" ? "active" : ""}>
-            <input
-              type="radio"
-              name="access-token-mode"
-              value="auto"
-              checked={accessTokenMode === "auto"}
-              onChange={() => {
-                setAccessTokenMode("auto");
-                setAccessToken("");
-                clearError("accessToken");
-              }}
-            />
-            <span><strong>自动获取</strong><small>运行时读取登录 Session</small></span>
-          </label>
-          <label className={accessTokenMode === "manual" ? "active" : ""}>
-            <input
-              type="radio"
-              name="access-token-mode"
-              value="manual"
-              checked={accessTokenMode === "manual"}
-              onChange={() => { setAccessTokenMode("manual"); clearError("accessToken"); }}
-            />
-            <span><strong>手动粘贴</strong><small>支持 Token 或 Session JSON</small></span>
-          </label>
-        </div>
-      </fieldset>
-      {accessTokenMode === "manual" ? (
-        <label className={`generator-field token-value-field ${errors.accessToken ? "has-error" : ""}`}>
-          <span><strong>Access Token / Session JSON</strong><small>仅用于当前生成结果</small></span>
-          <input
-            ref={accessTokenRef}
-            type="password"
-            value={accessToken}
-            onChange={(event) => { setAccessToken(event.target.value); clearError("accessToken"); }}
-            placeholder="粘贴 accessToken 或完整 Session JSON"
-            autoComplete="off"
-            spellCheck={false}
-            aria-invalid={Boolean(errors.accessToken)}
-          />
-          {errors.accessToken
-            ? <em role="alert">{errors.accessToken}</em>
-            : <small className="field-note">只提取 accessToken；切换回自动获取时立即清空</small>}
-        </label>
-      ) : null}
-    </>
-  );
 
   return (
     <div className="generator-page screenshot-generator-page">
@@ -412,9 +307,10 @@ export default function CheckoutGenerator({
         </div>
         <div className="activation-form">
           <label htmlFor="activation-cdk">CDK</label>
-          <div className="activation-input-row">
-            <KeyRound size={17} aria-hidden="true" />
+          <div className={`activation-input-row ${cdkActivated ? "activated" : ""}`}>
+            {cdkActivated ? <Check size={17} aria-hidden="true" /> : <KeyRound size={17} aria-hidden="true" />}
             <input
+              ref={activationRef}
               id="activation-cdk"
               value={activationCode}
               onChange={(event) => {
@@ -427,179 +323,153 @@ export default function CheckoutGenerator({
               spellCheck={false}
               aria-invalid={Boolean(activationError)}
             />
-            <button type="button" onClick={activateCode} disabled={activationBusy}>{activationBusy ? "验证中…" : "激活 CDK"}</button>
+            <button type="button" onClick={activateCode} disabled={activationBusy || cdkActivated}>
+              {cdkActivated ? "已激活" : activationBusy ? "验证中…" : "激活 CDK"}
+            </button>
           </div>
           <small>未激活时可以查看价格，但不能生成支付长链</small>
           {activationError ? <em className="activation-error" role="alert">{activationError}</em> : null}
         </div>
       </section>
 
-      <div className="generator-tool-tabs" role="tablist" aria-label="脚本类型">
-        <button role="tab" aria-selected={activeTool === "checkout"} className={activeTool === "checkout" ? "active" : ""} onClick={() => changeTool("checkout")}><Users size={16} /><span><strong>Team 优惠</strong><small>新建或已有空间</small></span></button>
+      <div className="ui-hidden-control" role="tablist" aria-label="脚本类型">
+        <button role="tab" aria-selected="true" onClick={() => onToolChange("checkout")}>Team 优惠</button>
       </div>
 
       <section className="generator-workspace" aria-labelledby="generator-title">
         <div className="generator-form-panel">
           <div className="generator-section-head region-section-head">
-            <div><span className="section-kicker">REGION PRICING</span><h2 id="generator-title">{activeTool === "checkout" ? "选择开通地区" : meta.title}</h2></div>
-            <span className="service-pill">服务端价格</span>
+            <h2 id="generator-title">选择开通地区</h2>
+            <span className="service-pill">服务端价格源</span>
           </div>
-          <p className="tool-description">{meta.description}</p>
 
-          {activeTool === "checkout" ? (
-            <div className="region-picker" aria-label="常用地区">
-              <div className="region-picker-grid">
-                {regionRows.map((row) => (
-                  <button
-                    className={`region-card ${country.toUpperCase() === row.countryCode ? "active" : ""}`}
-                    key={row.countryCode}
-                    type="button"
-                    onClick={() => {
-                      setCountry(row.countryCode);
-                      setCurrency(row.currencyCode);
-                      clearError("country");
-                      clearError("currency");
-                    }}
-                  >
-                    <span>{flagEmoji(row.countryCode)} {row.countryName}</span>
-                    <strong>{formatLocal(row)}</strong>
-                    <small>{row.currencyCode} · {row.countryCode}</small>
-                  </button>
+          <div className="region-picker" aria-label="地区选择">
+            <span className="region-group-label">低价常用国家</span>
+            <div className="region-picker-grid">
+              {commonCountries.map((row) => (
+                <button
+                  className={`region-card ${selectedCountry?.countryCode === row.countryCode ? "active" : ""}`}
+                  key={row.countryCode}
+                  type="button"
+                  onClick={() => chooseCountry(row)}
+                  aria-pressed={selectedCountry?.countryCode === row.countryCode}
+                >
+                  <strong>{row.countryName}</strong>
+                  <span><small>USD</small> {formatUsd(row.usdAmount)}</span>
+                  <em>{formatLocal(row)}</em>
+                </button>
+              ))}
+            </div>
+
+            <label className="region-select-label" htmlFor="checkout-region-select">其他国家</label>
+            <div className="region-search">
+              <Search size={16} aria-hidden="true" />
+              <select
+                id="checkout-region-select"
+                aria-label="其他国家"
+                value={selectedCountry?.countryCode || ""}
+                onChange={(event) => {
+                  const row = pricedCountries.find((item) => item.countryCode === event.target.value);
+                  if (row) chooseCountry(row);
+                }}
+              >
+                {pricedCountries.length ? null : <option value="">暂无价格数据</option>}
+                {pricedCountries.map((row) => (
+                  <option key={row.countryCode} value={row.countryCode}>{row.countryName} ({row.countryCode})</option>
                 ))}
+              </select>
+              <span>{selectedCountry?.currencyCode || currency}</span>
+            </div>
+          </div>
+
+          {selectedCountry ? (
+            <article className="selected-price-card" aria-live="polite">
+              <div className="selected-price-head">
+                <div><h3>{selectedCountry.countryName}</h3><span>{selectedCountry.countryCode} / {selectedCountry.currencyCode}</span></div>
+                <div><small>折合美元</small><strong>{formatUsd(selectedCountry.usdAmount)}</strong></div>
               </div>
-              <label className="region-search">
-                <Search size={15} aria-hidden="true" />
-                <span className="sr-only">搜索地区</span>
-                <input value={regionQuery} onChange={(event) => setRegionQuery(event.target.value)} placeholder="搜索国家或地区" list="checkout-country-list" />
-                <span>更多</span>
-              </label>
-            </div>
+              <dl>
+                <div><dt>当地单席位月价</dt><dd>{formatLocal(selectedCountry)}</dd></div>
+                <div><dt>按1席位优惠</dt><dd>{formatUsd(selectedCountry.usdAmount)}</dd></div>
+              </dl>
+            </article>
+          ) : (
+            <div className="selected-price-empty">价格数据加载中…</div>
+          )}
+
+          <p className="price-footnote">实时汇率 · ExchangeRate-API · {formatDate(selectedCountry?.fetchedAt)}。5 折金额仅为估算，优惠资格、税费和最终实付以结账页为准。</p>
+        </div>
+
+        <div className="generator-result-panel">
+          <div className="generator-section-head direct-title">
+            <h2>直接生成支付链接</h2>
+          </div>
+
+          <label className={`direct-field ${errors.coupon ? "has-error" : ""}`}>
+            <span><b>*</b> Business 优惠码</span>
+            <div><KeyRound size={16} aria-hidden="true" /><input ref={visibleCouponRef} value={coupon} onChange={(event) => { setCoupon(event.target.value); setGenerated(false); clearError("coupon"); }} placeholder="优惠码或 ChatGPT 优惠链接" autoComplete="off" spellCheck={false} aria-invalid={Boolean(errors.coupon)} /></div>
+            {errors.coupon ? <em role="alert">{errors.coupon}</em> : null}
+          </label>
+
+          <div className="access-help">
+            <strong>怎么获取 Access Token?</strong>
+            <ol>
+              <li>先在同一浏览器登录 ChatGPT。</li>
+              <li>打开 <a href="https://chatgpt.com/api/auth/session" target="_blank" rel="noreferrer">chatgpt.com/api/auth/session <ExternalLink size={11} /></a></li>
+              <li>复制其中的 <code>accessToken</code>，或者复制整页 JSON 粘贴到下方。</li>
+            </ol>
+          </div>
+
+          <label className={`direct-token-slot ${errors.accessToken ? "has-error" : ""}`}>
+            <span className="direct-token-label"><b>*</b> Access Token 或 Session JSON</span>
+            <textarea
+              ref={visibleTokenRef}
+              value={accessToken}
+              onChange={(event) => {
+                setAccessTokenMode("manual");
+                setAccessToken(event.target.value);
+                setGenerated(false);
+                clearError("accessToken");
+              }}
+              placeholder="粘贴 Access Token，或完整的 Session JSON"
+              autoComplete="off"
+              spellCheck={false}
+              aria-invalid={Boolean(errors.accessToken)}
+            />
+            {errors.accessToken ? <em role="alert">{errors.accessToken}</em> : null}
+          </label>
+
+          <button className="direct-generate-button" type="button" disabled={!cdkActivated} onClick={handleGenerate}>
+            <LockKeyhole size={16} /> {cdkActivated ? "生成支付链接" : "激活 CDK 后生成"}
+          </button>
+
+          {generated ? (
+            <section className="generated-output" aria-label="生成结果">
+              <div>
+                <span>支付脚本已就绪</span>
+                <small>复制后在已登录 ChatGPT 的页面控制台中运行</small>
+              </div>
+              <div className="generated-actions">
+                <button type="button" onClick={downloadCode}><Download size={14} /> 下载</button>
+                <button type="button" onClick={copyCode}>{copied ? <Check size={14} /> : <Copy size={14} />} {copied ? "已复制" : "复制代码"}</button>
+              </div>
+            </section>
           ) : null}
-
-          <form onSubmit={handleGenerate} noValidate>
-             {activeTool === "checkout" ? (
-               <>
-                <label className={`generator-field ${errors.existingWorkspaceId ? "has-error" : ""}`}>
-                  <span><strong>已有 Codex 空间 ID</strong><small>可选</small></span>
-                  <input ref={workspaceIdRef} value={existingWorkspaceId} onChange={(event) => { setExistingWorkspaceId(event.target.value.trim()); clearError("existingWorkspaceId"); }} placeholder="填写 UUID 则应用到已有空间；留空则新建" autoComplete="off" spellCheck={false} aria-invalid={Boolean(errors.existingWorkspaceId)} />
-                  {errors.existingWorkspaceId ? <em role="alert">{errors.existingWorkspaceId}</em> : <small className="field-note">适用于已有 0.52 Codex 空间</small>}
-                </label>
-                <div className="generator-field-grid">
-                  <label className={`generator-field ${errors.country ? "has-error" : ""}`}>
-                    <span><strong>国家 ISO 缩写</strong><small>2 位字母</small></span>
-                    <div className="iso-input"><b>ISO</b><input ref={countryRef} value={country} onChange={(event) => { setCountry(normalizeIsoInput(event.target.value, 2)); clearError("country"); }} maxLength={2} list="checkout-country-list" autoComplete="country" spellCheck={false} aria-invalid={Boolean(errors.country)} /></div>
-                    <datalist id="checkout-country-list">{countries.map((row) => <option key={row.countryCode} value={row.countryCode}>{row.countryName}</option>)}</datalist>
-                    {errors.country ? <em role="alert">{errors.country}</em> : <small className="field-note">例如 CN、US、KE</small>}
-                  </label>
-                  <label className={`generator-field ${errors.currency ? "has-error" : ""}`}>
-                    <span><strong>货币 ISO 缩写</strong><small>39 种可选</small></span>
-                    <div className="iso-input"><b>ISO</b><input ref={currencyRef} value={currency} onChange={(event) => { setCurrency(normalizeIsoInput(event.target.value, 3)); clearError("currency"); }} maxLength={3} list="checkout-currency-list" autoComplete="off" spellCheck={false} aria-invalid={Boolean(errors.currency)} /></div>
-                    <datalist id="checkout-currency-list">{CHECKOUT_CURRENCIES.map(([code, name]) => <option key={code} value={code}>{name}</option>)}</datalist>
-                    {errors.currency ? <em role="alert">{errors.currency}</em> : <small className="field-note">{currencyName ? `${checkoutInput.currency} · ${currencyName}` : "输入或选择货币代码"}</small>}
-                  </label>
-                </div>
-                <div className="quick-currency-row" aria-label="常用货币快捷选择"><span>快捷选择</span>{commonCurrencies.map((code) => <button key={code} type="button" className={checkoutInput.currency === code ? "active" : ""} onClick={() => { setCurrency(code); clearError("currency"); }}>{code}</button>)}</div>
-              </>
-            ) : null}
-
-            {activeTool === "codex" ? (
-              <>
-                <label className={`generator-field ${errors.workspaceName ? "has-error" : ""}`}>
-                  <span><strong>空间名称</strong><small>必填</small></span>
-                  <input ref={workspaceNameRef} value={workspaceName} onChange={(event) => { setWorkspaceName(event.target.value); clearError("workspaceName"); }} placeholder="填写空间名称" autoComplete="off" aria-invalid={Boolean(errors.workspaceName)} />
-                  {errors.workspaceName ? <em role="alert">{errors.workspaceName}</em> : null}
-                </label>
-                <div className="generator-field-grid">
-                  <label className={`generator-field ${errors.creditQuantity ? "has-error" : ""}`}>
-                    <span><strong>Credit 数量</strong><small>大于 0 的整数</small></span>
-                    <input ref={creditQuantityRef} type="number" min="1" step="1" value={creditQuantity} onChange={(event) => { setCreditQuantity(event.target.value); clearError("creditQuantity"); }} aria-invalid={Boolean(errors.creditQuantity)} />
-                    {errors.creditQuantity ? <em role="alert">{errors.creditQuantity}</em> : <small className="field-note">默认 13 Credit</small>}
-                  </label>
-                  <label className={`generator-field ${errors.country ? "has-error" : ""}`}>
-                    <span><strong>国家或地区</strong><small>自动匹配货币</small></span>
-                    <select value={codexCountry} onChange={(event) => { setCodexCountry(event.target.value); clearError("country"); }} aria-invalid={Boolean(errors.country)}>
-                      {CODEX_COUNTRIES.map(([code, name, mappedCurrency]) => <option key={code} value={code}>{name} ({mappedCurrency})</option>)}
-                    </select>
-                    <small className="field-note">{selectedCodexCountry[0]} · {selectedCodexCountry[2]}</small>
-                  </label>
-                </div>
-              </>
-            ) : null}
-
-            {activeTool === "billing" ? (
-              <div className="billing-scope-note"><ReceiptText size={18} /><div><strong>查询内容</strong><span>账户 ID、套餐、最近 10 条发票、支付方式和账单资料；结果保存到 <code>window.__billingResult</code>。</span></div></div>
-            ) : null}
-
-            {renderTokenFields()}
-
-            {activeTool !== "billing" ? (
-              <label className="generator-checkbox"><input type="checkbox" checked={autoOpen} onChange={(event) => setAutoOpen(event.target.checked)} /><span>生成成功后自动打开支付页面</span></label>
-            ) : null}
-
-            <button className="generate-button" type="submit"><Sparkles size={17} /> 生成{meta.title} <span>→</span></button>
-          </form>
-
-          <div className="generator-steps">
-            <span>安全提示</span>
-            {activeTool === "billing" ? (
-              <p>查询结果包含发票、支付方式和账单资料。请仅在自己的账户中运行，不要分享控制台输出。</p>
-            ) : (
-              <p>请使用 Personal/Free 个人账户 Token，不要使用 Business/Codex 空间 Token，并在支付页核对最终金额与目标空间。</p>
-            )}
-          </div>
         </div>
+      </section>
 
-        <div className="generator-result-panel" id="script-result">
-          <div className="direct-link-panel">
-            <div className="generator-section-head result-head">
-              <div><span className="section-kicker">CHECKOUT OUTPUT</span><h2>直接生成支付链接</h2></div>
-              <span className="live-preview"><span /> 实时校验</span>
-            </div>
-            {activeTool === "checkout" ? (
-              <>
-                <label className="direct-field">
-                  <span><b>*</b> Business 优惠码</span>
-                  <div><KeyRound size={16} aria-hidden="true" /><input ref={couponRef} value={coupon} onChange={(event) => { setCoupon(event.target.value); clearError("coupon"); }} placeholder="例如：XXXXXXXXXXXX" autoComplete="off" spellCheck={false} aria-invalid={Boolean(errors.coupon)} /></div>
-                  {errors.coupon ? <em role="alert">{errors.coupon}</em> : null}
-                </label>
-                <div className="access-help">
-                  <strong>怎么获取 Access Token?</strong>
-                  <ol>
-                    <li>先在同一浏览器登录 ChatGPT。</li>
-                    <li>打开 <code>chatgpt.com/api/auth/session</code>。</li>
-                    <li>复制其中的 <code>accessToken</code>，或复制整页 JSON。</li>
-                  </ol>
-                </div>
-              </>
-            ) : null}
-            <div className="direct-token-slot">
-              <span className="direct-token-label">{accessTokenMode === "manual" ? "Access Token 或 Session JSON" : "Access Token 来源"}</span>
-              {accessTokenMode === "manual" ? (
-                <textarea value={accessToken} onChange={(event) => { setAccessToken(event.target.value); clearError("accessToken"); }} placeholder="粘贴 Access Token，或完整 Session JSON" autoComplete="off" spellCheck={false} />
-              ) : (
-                <div className="token-mode-summary"><ShieldCheck size={15} /> 自动获取登录 Session <button type="button" onClick={() => { setAccessTokenMode("manual"); clearError("accessToken"); }}>改为手动粘贴</button></div>
-              )}
-            </div>
-            <button className="direct-generate-button" type="button" disabled={!cdkActivated} onClick={() => handleGenerate({ preventDefault: () => undefined } as React.FormEvent)}><LockKeyhole size={16} /> {cdkActivated ? "生成支付链接" : "激活 CDK 后生成"}</button>
-          </div>
-          <div className="legacy-output">
-          <div className="generator-section-head result-head">
-            <div><span className="section-kicker">LOCAL OUTPUT</span><h2>JavaScript</h2></div>
-            <div className="code-actions">
-              <button type="button" onClick={downloadCode} aria-disabled={!isInputValid}><Download size={14} /> 下载</button>
-              <button className="copy-code" type="button" onClick={copyCode} aria-disabled={!isInputValid}>{copied ? <Check size={14} /> : <Copy size={14} />} {copied ? "已复制" : "复制代码"}</button>
-            </div>
-          </div>
-          <div className="code-preview">
-            <div className="code-titlebar"><span /><span /><span /><small>{meta.codeTitle}</small></div>
-            <pre><code>{source}</code></pre>
-          </div>
-          <div className="result-meta">
-            <span><Info size={13} /> 在已登录 ChatGPT 的页面控制台中运行</span>
-            <button type="button" onClick={reset}><RotateCcw size={13} /> 恢复默认值</button>
-            </div>
-          </div>
-        </div>
+      <section className="ui-hidden-control" aria-label="高级参数与本地输出">
+        <input ref={couponRef} value={coupon} onChange={(event) => setCoupon(event.target.value)} placeholder="例如：XXXXXXXXXXXX" />
+        <label>已有 Codex 空间 ID<input ref={workspaceIdRef} value={existingWorkspaceId} onChange={(event) => setExistingWorkspaceId(event.target.value.trim())} /></label>
+        <label>国家 ISO 缩写<input ref={countryRef} value={country} onChange={(event) => setCountry(normalizeIsoInput(event.target.value, 2))} /></label>
+        <label>货币 ISO 缩写<input ref={currencyRef} value={currency} onChange={(event) => setCurrency(normalizeIsoInput(event.target.value, 3))} /></label>
+        <label><input type="radio" name="access-token-mode" checked={accessTokenMode === "auto"} onChange={() => { setAccessTokenMode("auto"); setAccessToken(""); }} /> 自动获取</label>
+        <label><input type="radio" name="access-token-mode" checked={accessTokenMode === "manual"} onChange={() => setAccessTokenMode("manual")} /> 手动粘贴</label>
+        {accessTokenMode === "manual" ? <input ref={accessTokenRef} value={accessToken} onChange={(event) => setAccessToken(event.target.value)} placeholder="粘贴 accessToken 或完整 Session JSON" /> : null}
+        <label><input type="checkbox" checked={autoOpen} onChange={(event) => setAutoOpen(event.target.checked)} /> 生成成功后自动打开支付页面</label>
+        <button type="button" onClick={downloadCode} aria-disabled={!isInputValid}><Download size={14} /> 下载</button>
+        <button type="button" onClick={copyCode} aria-disabled={!isInputValid}>{copied ? <Check size={14} /> : <Copy size={14} />} {copied ? "已复制" : "复制代码"}</button>
+        <button type="button" onClick={reset}><RotateCcw size={13} /> 恢复默认值</button>
       </section>
 
       <section className="generator-disclaimer"><Info size={18} /><p><strong>请仅在你有权操作的账号中使用。</strong> 第三方接口、促销资格和结账规则可能调整，实际结果以 ChatGPT 页面为准。</p></section>
