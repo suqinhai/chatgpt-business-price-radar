@@ -436,8 +436,6 @@ export default function CheckoutGenerator({
 
       <div className="generator-tool-tabs" role="tablist" aria-label="脚本类型">
         <button role="tab" aria-selected={activeTool === "checkout"} className={activeTool === "checkout" ? "active" : ""} onClick={() => changeTool("checkout")}><Users size={16} /><span><strong>Team 优惠</strong><small>新建或已有空间</small></span></button>
-        <button role="tab" aria-selected={activeTool === "codex"} className={activeTool === "codex" ? "active" : ""} onClick={() => changeTool("codex")}><CreditCard size={16} /><span><strong>Codex 按量</strong><small>购买 Workspace Credit</small></span></button>
-        <button role="tab" aria-selected={activeTool === "billing"} className={activeTool === "billing" ? "active" : ""} onClick={() => changeTool("billing")}><ReceiptText size={16} /><span><strong>账单查询</strong><small>发票与支付资料</small></span></button>
       </div>
 
       <section className="generator-workspace" aria-labelledby="generator-title">

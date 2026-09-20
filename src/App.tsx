@@ -39,9 +39,7 @@ function readRoute(): AppRoute {
   const params = new URLSearchParams(window.location.search);
   return {
     view: params.get("view") === "generator" ? "generator" : "prices",
-    tool: params.get("tool") === "codex" || params.get("tool") === "billing"
-      ? params.get("tool") as GeneratorTool
-      : "checkout",
+    tool: "checkout",
     country: params.get("country")?.toUpperCase() || DEFAULT_CHECKOUT_COUNTRY,
     currency: params.get("currency")?.toUpperCase() || DEFAULT_CHECKOUT_CURRENCY,
   };
