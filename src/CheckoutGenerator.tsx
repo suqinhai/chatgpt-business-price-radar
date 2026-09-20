@@ -367,7 +367,7 @@ export default function CheckoutGenerator({
     <div className="generator-page screenshot-generator-page">
       <section className="generator-hero">
         <div>
-          <button className="back-link" type="button" onClick={onBack}><ArrowLeft size={15} /> 返回价格雷达</button>
+          <button className="back-link ui-hidden-control" type="button" onClick={onBack}><ArrowLeft size={15} /> 返回价格雷达</button>
           <span className="eyebrow"><Code2 size={15} /> BUSINESS TOOLKIT · LONG LINK</span>
           <h1>Business <em>长链生成</em></h1>
           <p>查询 ChatGPT Business 地区价格，并通过服务端生成与所选地区匹配的支付链接。</p>

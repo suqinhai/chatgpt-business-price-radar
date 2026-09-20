@@ -431,6 +431,10 @@ footer > span:last-child { text-align: right; }
 .legacy-output .code-preview pre { max-height: 180px; }
 .legacy-output .result-meta { margin-top: 10px; }
 
+/* The reference layout is intentionally distraction-free. Keep these controls
+   available to keyboard and assistive-technology users without showing them. */
+.ui-hidden-control { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0 0 0 0) !important; white-space: nowrap !important; border: 0 !important; }
+
 @media (max-width: 760px) {
   .screenshot-generator-page .generator-hero { min-height: 0; grid-template-columns: 1fr; gap: 22px; padding-bottom: 24px; }
   .screenshot-generator-page .generator-promise { align-self: stretch; }

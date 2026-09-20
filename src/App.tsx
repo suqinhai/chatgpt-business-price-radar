@@ -172,7 +172,7 @@ export default function App() {
             <small>价格与结账工具</small>
           </span>
         </button>
-        <nav className="tool-navigation" aria-label="工具导航">
+        <nav className="tool-navigation ui-hidden-control" aria-label="工具导航">
           <button className={route.view === "prices" ? "active" : ""} type="button" onClick={() => navigate("prices")}>
             <CircleDollarSign size={15} /> 价格雷达
           </button>
@@ -183,7 +183,7 @@ export default function App() {
         <div className="topbar-actions">
           {route.view === "prices" ? <span className="source-pill"><span className="live-dot" /> OpenAI 公开配置</span> : null}
           <a
-            className="github-badge"
+            className="github-badge ui-hidden-control"
             href="https://github.com/zhangkaihua88/chatgpt-business-price-radar"
             target="_blank"
             rel="noreferrer"
