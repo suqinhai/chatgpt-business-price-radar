@@ -5,7 +5,7 @@
 	"compatibility_date": "2026-09-20",
 	"d1_databases": [
 		{
-			"binding": "chatgpt_business_price_radar_cdks",
+			"binding": "CDK_DB",
 			"database_name": "chatgpt-business-price-radar-cdks",
 			"database_id": "22924091-9d20-4c40-ad8d-1183069b9bc0",
 			"remote": true
