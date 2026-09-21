@@ -10,11 +10,14 @@ export const onRequestGet = async (context: CdkContext): Promise<Response> => {
   const requestedOffset = Number(url.searchParams.get("offset") || 0);
   const limit = Number.isInteger(requestedLimit) ? Math.min(100, Math.max(1, requestedLimit)) : 50;
   const offset = Number.isInteger(requestedOffset) ? Math.max(0, requestedOffset) : 0;
-  const result = await context.env.CDK_DB.prepare(
-    "SELECT id, code_prefix, created_at, expires_at, max_uses, used_count, last_used_at, revoked_at FROM cdks ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
-  ).bind(limit, offset).all<CdkRecord>();
+  const [result, countResult] = await Promise.all([
+    context.env.CDK_DB.prepare(
+      "SELECT id, code_prefix, created_at, expires_at, max_uses, used_count, last_used_at, revoked_at FROM cdks ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+    ).bind(limit, offset).all<CdkRecord>(),
+    context.env.CDK_DB.prepare("SELECT COUNT(*) AS total FROM cdks").first<{ total: number }>(),
+  ]);
 
-  return json({ ok: true, limit, offset, cdks: result.results });
+  return json({ ok: true, limit, offset, total: Number(countResult?.total || 0), cdks: result.results });
 };
 
 export const onRequest = (context: CdkContext) => {

@@ -725,8 +725,13 @@ footer > span:last-child { text-align: right; }
 .cdk-record-actions { display: flex; align-items: center; gap: 5px; }
 .cdk-record-actions button { display: inline-flex; min-height: 31px; align-items: center; justify-content: center; gap: 5px; padding: 0 9px; border: 1px solid #dfc1bb; border-radius: 8px; background: #fff8f6; color: #a2483c; font-size: 8px; font-weight: 800; cursor: pointer; }
 .cdk-record-actions button:disabled { opacity: .4; cursor: not-allowed; }
+.cdk-record-actions button.copy { border-color: #b8cabe; background: #f4faf5; color: var(--green); }
 .cdk-record-actions .confirm { border-color: #c06154; background: #ad4d41; color: white; }
 .cdk-record-actions .cancel { min-width: 31px; padding: 0; border-color: #d4ddd6; background: white; color: #64736b; }
+.cdk-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; color: #738078; font-size: 9px; }
+.cdk-pagination > div { display: flex; gap: 6px; }
+.cdk-pagination button { display: inline-flex; min-height: 31px; align-items: center; gap: 4px; padding: 0 9px; border: 1px solid #c7d4ca; border-radius: 8px; background: white; color: #617168; font-size: 8px; font-weight: 800; cursor: pointer; }
+.cdk-pagination button:disabled { opacity: .45; cursor: not-allowed; }
 .admin-empty { display: grid; min-height: 240px; place-items: center; align-content: center; gap: 10px; color: #8b9891; }
 .admin-empty span { font-size: 10px; }
 .spin { animation: admin-spin .8s linear infinite; }
@@ -759,4 +764,5 @@ footer > span:last-child { text-align: right; }
   .cdk-record-main { grid-column: auto; }
   .cdk-record-actions { justify-content: flex-start; }
   .generated-codes-head { align-items: flex-start; flex-direction: column; }
+  .cdk-pagination { align-items: flex-start; flex-direction: column; }
 }

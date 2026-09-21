@@ -40,7 +40,7 @@ npx wrangler pages dev dist --d1 CDK_DB=<本地或远程数据库 ID>
 https://你的域名/admin
 ```
 
-输入设置在 Cloudflare Pages 中的 `CDK_ADMIN_TOKEN` 后，即可批量生成、复制、查看状态和撤销 CDK。管理员密钥只保存在当前页面内存中，不会写入 URL、Local Storage 或数据库。旧的 `/?view=admin` 链接会自动跳转到 `/admin`。
+输入设置在 Cloudflare Pages 中的 `CDK_ADMIN_TOKEN` 后，即可批量生成、复制、分页查看状态和撤销 CDK。新生成批次的明文会暂存在当前页面内存中，列表中的“复制 CDK”按钮仅对这批明文可用；管理员密钥只保存在当前页面内存中，不会写入 URL、Local Storage 或数据库。旧的 `/?view=admin` 链接会自动跳转到 `/admin`。
 
 也可以通过命令行发放：
 
@@ -85,7 +85,7 @@ npm run cdk:issue
 
 ## 管理和撤销
 
-- `GET /api/cdk/admin/list?limit=50&offset=0`：查看前缀、使用次数、过期和撤销状态，不返回明文 CDK。
+- `GET /api/cdk/admin/list?limit=50&offset=0`：分页查看前缀、使用次数、过期和撤销状态，响应中的 `total` 用于计算总页数；接口不返回明文 CDK。
 - `POST /api/cdk/admin/revoke`：请求体使用 `{ "code": "CDK-..." }` 或 `{ "id": "..." }`。
 
 ## 当前边界

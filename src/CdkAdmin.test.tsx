@@ -40,7 +40,7 @@ describe("CDK admin page", () => {
     await user.click(screen.getByRole("button", { name: "验证并连接" }));
 
     expect(await screen.findByText("CDK-ABCD-••••-••••")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith("/api/cdk/admin/list?limit=100&offset=0", expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith("/api/cdk/admin/list?limit=20&offset=0", expect.objectContaining({
       headers: expect.objectContaining({ authorization: "Bearer private-admin-token" }),
     }));
     expect(Object.values(window.localStorage)).not.toContain("private-admin-token");
@@ -68,6 +68,29 @@ describe("CDK admin page", () => {
 
     await user.click(screen.getByRole("button", { name: "复制全部" }));
     expect(writeText).toHaveBeenCalledWith("CDK-ABCD-EFGH-JKLM\nCDK-WXYZ-2345-6789");
+
+    await user.click(screen.getByRole("button", { name: "复制 CDK" }));
+    expect(writeText).toHaveBeenLastCalledWith("CDK-ABCD-EFGH-JKLM");
+  });
+
+  it("paginates the CDK inventory", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ ok: true, cdks: [record], total: 21 }))
+      .mockResolvedValueOnce(response({ ok: true, cdks: [{ ...record, id: "record-21" }], total: 21 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<CdkAdmin onBack={() => undefined} />);
+    await user.type(screen.getByLabelText("管理员密钥"), "admin-token");
+    await user.click(screen.getByRole("button", { name: "验证并连接" }));
+
+    expect(await screen.findByText("第 1 / 2 页")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "下一页" }));
+
+    expect(await screen.findByText("第 2 / 2 页")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/cdk/admin/list?limit=20&offset=20", expect.objectContaining({
+      headers: expect.objectContaining({ authorization: "Bearer admin-token" }),
+    }));
   });
 
   it("requires a second click before revoking a record", async () => {

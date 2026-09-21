@@ -1,6 +1,8 @@
 import {
   ArrowLeft,
   Check,
+  ChevronLeft,
+  ChevronRight,
   ClipboardCopy,
   KeyRound,
   LoaderCircle,
@@ -49,6 +51,8 @@ const statusOf = (record: CdkRecord) => {
   return { label: "可使用", tone: "active" };
 };
 
+const RECORDS_PER_PAGE = 20;
+
 export default function CdkAdmin({ onBack }: CdkAdminProps) {
   const [adminToken, setAdminToken] = useState("");
   const [authorized, setAuthorized] = useState(false);
@@ -56,17 +60,21 @@ export default function CdkAdmin({ onBack }: CdkAdminProps) {
   const [maxUses, setMaxUses] = useState("1");
   const [expiresAt, setExpiresAt] = useState("");
   const [records, setRecords] = useState<CdkRecord[]>([]);
+  const [page, setPage] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
   const [generatedCodes, setGeneratedCodes] = useState<string[]>([]);
   const [busy, setBusy] = useState<"connect" | "issue" | "list" | "revoke" | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [copied, setCopied] = useState(false);
+  const [copiedRecordId, setCopiedRecordId] = useState<string | null>(null);
   const [pendingRevoke, setPendingRevoke] = useState<string | null>(null);
 
   const activeCount = useMemo(
     () => records.filter((record) => statusOf(record).tone === "active").length,
     [records],
   );
+  const pageCount = Math.max(1, Math.ceil(totalRecords / RECORDS_PER_PAGE));
 
   const request = async <T,>(path: string, init: RequestInit = {}): Promise<T> => {
     const response = await fetch(path, {
@@ -84,21 +92,27 @@ export default function CdkAdmin({ onBack }: CdkAdminProps) {
     return payload;
   };
 
-  const loadRecords = async (mode: "connect" | "list" = "list") => {
+  const loadRecords = async (mode: "connect" | "list" = "list", requestedPage = page) => {
     if (!adminToken.trim()) {
       setError("请输入管理员密钥");
       return;
     }
+    const nextPage = Math.max(1, requestedPage);
     setBusy(mode);
     setError("");
     try {
-      const payload = await request<{ ok: boolean; cdks: CdkRecord[] }>("/api/cdk/admin/list?limit=100&offset=0");
+      const offset = (nextPage - 1) * RECORDS_PER_PAGE;
+      const payload = await request<{ ok: boolean; cdks: CdkRecord[]; total?: number }>(`/api/cdk/admin/list?limit=${RECORDS_PER_PAGE}&offset=${offset}`);
       setRecords(payload.cdks);
+      setTotalRecords(payload.total ?? payload.cdks.length);
+      setPage(nextPage);
       setAuthorized(true);
       setNotice(mode === "connect" ? "管理员身份验证成功" : "CDK 列表已刷新");
     } catch (requestError) {
       setAuthorized(false);
       setRecords([]);
+      setPage(1);
+      setTotalRecords(0);
       setError(requestError instanceof Error ? requestError.message : "无法加载 CDK 列表");
     } finally {
       setBusy(null);
@@ -138,16 +152,14 @@ export default function CdkAdmin({ onBack }: CdkAdminProps) {
       });
       setGeneratedCodes(payload.codes);
       setNotice(`已生成 ${payload.codes.length} 个 CDK`);
-      await loadRecords("list");
+      await loadRecords("list", 1);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "生成 CDK 失败");
       setBusy(null);
     }
   };
 
-  const copyCodes = async () => {
-    if (!generatedCodes.length) return;
-    const text = generatedCodes.join("\n");
+  const writeClipboard = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
     } catch {
@@ -160,9 +172,28 @@ export default function CdkAdmin({ onBack }: CdkAdminProps) {
       document.execCommand?.("copy");
       textarea.remove();
     }
+  };
+
+  const copyCodes = async () => {
+    if (!generatedCodes.length) return;
+    await writeClipboard(generatedCodes.join("\n"));
     setCopied(true);
     setNotice("CDK 已复制到剪贴板");
     window.setTimeout(() => setCopied(false), 1800);
+  };
+
+  const copyRecordCode = async (record: CdkRecord) => {
+    const code = generatedCodes.find((generatedCode) => generatedCode.startsWith(`${record.code_prefix}-`));
+    if (!code) {
+      setError("该 CDK 的明文仅在生成时显示，当前页面无法恢复");
+      setNotice("");
+      return;
+    }
+    await writeClipboard(code);
+    setCopiedRecordId(record.id);
+    setError("");
+    setNotice("CDK 已复制到剪贴板");
+    window.setTimeout(() => setCopiedRecordId((current) => current === record.id ? null : current), 1800);
   };
 
   const revokeCode = async (id: string) => {
@@ -209,6 +240,8 @@ export default function CdkAdmin({ onBack }: CdkAdminProps) {
                 setAdminToken(event.target.value);
                 setAuthorized(false);
                 setRecords([]);
+                setPage(1);
+                setTotalRecords(0);
                 setGeneratedCodes([]);
                 setError("");
               }}
@@ -275,8 +308,8 @@ export default function CdkAdmin({ onBack }: CdkAdminProps) {
             </button>
           </div>
           <div className="admin-list-summary">
-            <span>最近记录 <strong>{records.length}</strong></span>
-            <span>当前可用 <strong>{activeCount}</strong></span>
+            <span>最近记录 <strong>{totalRecords}</strong></span>
+            <span>本页可用 <strong>{activeCount}</strong></span>
           </div>
           <div className="cdk-record-list">
             {!authorized ? (
@@ -298,7 +331,19 @@ export default function CdkAdmin({ onBack }: CdkAdminProps) {
                         <button className="cancel" type="button" onClick={() => setPendingRevoke(null)} aria-label="取消撤销"><X size={14} /></button>
                       </>
                     ) : (
-                      <button type="button" onClick={() => setPendingRevoke(record.id)} disabled={status.tone === "revoked"}><Trash2 size={14} /> 撤销</button>
+                      <>
+                        <button
+                          className="copy"
+                          type="button"
+                          onClick={() => void copyRecordCode(record)}
+                          disabled={!generatedCodes.some((generatedCode) => generatedCode.startsWith(`${record.code_prefix}-`))}
+                          title={generatedCodes.some((generatedCode) => generatedCode.startsWith(`${record.code_prefix}-`)) ? "复制完整 CDK" : "完整 CDK 仅在生成时显示"}
+                        >
+                          {copiedRecordId === record.id ? <Check size={14} /> : <ClipboardCopy size={14} />}
+                          {copiedRecordId === record.id ? "已复制" : "复制 CDK"}
+                        </button>
+                        <button type="button" onClick={() => setPendingRevoke(record.id)} disabled={status.tone === "revoked"}><Trash2 size={14} /> 撤销</button>
+                      </>
                     )}
                   </div>
                 </article>
@@ -307,6 +352,19 @@ export default function CdkAdmin({ onBack }: CdkAdminProps) {
               <div className="admin-empty"><ShieldCheck size={22} /><span>还没有 CDK 记录</span></div>
             )}
           </div>
+          {authorized && totalRecords > 0 ? (
+            <nav className="cdk-pagination" aria-label="CDK 列表分页">
+              <span>第 {page} / {pageCount} 页</span>
+              <div>
+                <button type="button" aria-label="上一页" onClick={() => void loadRecords("list", page - 1)} disabled={page <= 1 || busy === "list"}>
+                  <ChevronLeft size={14} /> 上一页
+                </button>
+                <button type="button" aria-label="下一页" onClick={() => void loadRecords("list", page + 1)} disabled={page >= pageCount || busy === "list"}>
+                  下一页 <ChevronRight size={14} />
+                </button>
+              </div>
+            </nav>
+          ) : null}
         </div>
       </section>
     </div>
