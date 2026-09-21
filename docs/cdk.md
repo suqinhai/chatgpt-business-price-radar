@@ -30,7 +30,16 @@
 
    `CDK_SESSION_SECRET` 不会返回给浏览器；激活成功后只会签发一个约 15 分钟有效的 activation token。
 
-5. 重新部署 Pages。绑定或 Secret 修改后必须重新部署，Pages Function 才能读取新配置。
+5. 成对设置 checkout 国家中继地址和 HMAC 密钥。两者都存在时启用中继，只设置一个会让生成接口明确报配置错误：
+
+   ```bash
+   npx wrangler pages secret put CHATGPT_RELAY_URL --project-name=chatgpt-business-price-radar
+   npx wrangler pages secret put CHATGPT_RELAY_SECRET --project-name=chatgpt-business-price-radar
+   ```
+
+   在命令提示后分别输入已部署的 HTTPS 中继地址和共享密钥。不要把真实密钥写进命令历史、仓库、`wrangler.jsonc` 或任何 `VITE_*` 变量。
+
+6. 重新部署 Pages。绑定或 Secret 修改后必须重新部署，Pages Function 才能读取新配置。
 
 本地调试时可以复制 `.dev.vars.example` 为 `.dev.vars`，再使用 Pages Functions 的本地服务器并传入 D1 绑定：
 
@@ -95,9 +104,11 @@ npm run cdk:issue
 
 ## 服务端生成支付链接
 
-前端会把激活 token、所选国家和货币、优惠码、已有空间 ID（可选）以及用户主动粘贴的 Access Token 发送到 `POST /api/checkout/generate`。接口在内存中提取 Access Token，调用 ChatGPT 的 checkout API，并只返回 HTTPS 支付链接；不会把 Access Token 写入 D1、URL 或日志。
+前端会把激活 token、所选国家和货币、优惠码、已有空间 ID（可选）以及用户主动粘贴的 Access Token 发送到 `POST /api/checkout/generate`。接口在内存中提取 Access Token，并只返回 HTTPS 支付链接；不会把 Access Token 写入 D1、URL、日志、错误响应或客户端 bundle。
 
-该接口提交的是 ChatGPT checkout payload 的 `billing_details`，不是 IP 伪装。Cloudflare Pages 无法把出口地址切换成任意第三方 IP 清单中的地址；`all.json` 中的 IP/端口条目也不等同于可用的 HTTP/SOCKS 代理，不能直接用于服务端登录或绕过地区限制。
+配置 `CHATGPT_RELAY_URL` 与 `CHATGPT_RELAY_SECRET` 后，Pages Function 会在服务端向固定环境变量中的中继地址发送一次 POST。请求外层包含大写两位 `country`、Access Token 和项目原有 checkout payload；外层国家与 `billing_details.country` 始终一致。每次请求生成新的 nonce，并严格签名实际发送的原始 JSON 字符串。该 POST 不自动重试，也不接受浏览器传入目标 URL。
+
+两项中继变量都未设置时，接口保留原有的 ChatGPT 直连行为；只设置其中一项时会返回 `relay_configuration_invalid`，不会静默回退。中继错误只映射为稳定错误码和安全提示，不透传原始上游响应、代理 IP 或内部堆栈。
 
 ## 管理和撤销
 
@@ -106,4 +117,4 @@ npm run cdk:issue
 
 ## 当前边界
 
-页面仍保留浏览器本地脚本作为后备输出，但“直接生成支付链接”已经走 Pages Function。请只在你有权操作的账号中使用；第三方接口、促销资格和 ChatGPT 风控规则可能调整，最终结果以 ChatGPT 结账页为准。
+“直接生成支付链接”走 Pages Function；配置中继后，中继签名密钥与实际 checkout 请求都只存在于服务端执行路径。请只在你有权操作的账号中使用；第三方接口、促销资格和 ChatGPT 风控规则可能调整，最终结果以 ChatGPT 结账页为准。

@@ -5,6 +5,7 @@ import {
   verifyActivationToken,
   type CdkContext,
 } from "../cdk/_shared";
+import { postRelayCheckout, type CheckoutPayload } from "./_relay";
 
 const CHATGPT_CHECKOUT_URL = "https://chatgpt.com/backend-api/payments/checkout";
 const MAX_BODY_BYTES = 64 * 1024;
@@ -13,20 +14,6 @@ const SUPPORTED_CURRENCIES = new Set([
   "VND", "PHP", "NGN", "ZAR", "KZT", "TZS", "EGP", "BRL", "SEK", "CZK", "PLN", "DKK", "NOK",
   "KRW", "COP", "MXN", "PEN", "HUF", "QAR", "RON", "ILS", "AED", "SGD", "NZD", "CHF", "SAR",
 ]);
-
-type CheckoutPayload = {
-  plan_name: "chatgptteamplan";
-  team_plan_data: {
-    workspace_name: string;
-    price_interval: "month";
-    seat_quantity: 2;
-    existing_workspace_id?: string;
-  };
-  billing_details: { country: string; currency: string };
-  cancel_url: string;
-  promo_code: string;
-  checkout_ui_mode: "hosted";
-};
 
 function stringValue(value: unknown, maxLength: number): string | null {
   if (typeof value !== "string") return null;
@@ -107,6 +94,35 @@ function upstreamMessage(status: number): { status: number; error: string; messa
   return { status: 502, error: "chatgpt_unavailable", message: "ChatGPT 结账服务暂时不可用，请稍后重试" };
 }
 
+const RELAY_FAILURES: Record<string, { status: number; message: string }> = {
+  request_expired: { status: 401, message: "国家中继请求已过期，请检查服务器时间配置" },
+  invalid_signature: { status: 401, message: "国家中继鉴权失败，请检查服务端中继配置" },
+  chatgpt_auth_failed: { status: 401, message: "ChatGPT 凭证无效或已过期，请重新获取 Access Token" },
+  replayed_nonce: { status: 409, message: "国家中继拒绝了重复请求，请重新提交" },
+  rate_limited: { status: 429, message: "请求过于频繁，请稍后重试" },
+  country_proxy_unavailable: { status: 503, message: "所选国家暂时没有可用出口，请稍后重试" },
+  proxy_connect_failed: { status: 502, message: "国家中继暂时无法连接出口，请稍后重试" },
+  upstream_unavailable: { status: 502, message: "ChatGPT 结账服务暂时不可用，请稍后重试" },
+  checkout_rejected: { status: 400, message: "ChatGPT 拒绝了结账请求，请核对优惠码、账户和地区" },
+  invalid_payload: { status: 400, message: "结账请求参数无效，请检查后重试" },
+};
+
+function relayFailure(data: Record<string, unknown>): { status: number; error: string; message: string } {
+  const error = typeof data.error === "string" ? data.error : "";
+  const known = RELAY_FAILURES[error];
+  if (known) return { status: known.status, error, message: known.message };
+  return { status: 502, error: "relay_unavailable", message: "国家中继服务暂时不可用，请稍后重试" };
+}
+
+function validRelayUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password && !url.hash;
+  } catch {
+    return false;
+  }
+}
+
 export const onRequestPost = async (context: CdkContext): Promise<Response> => {
   const secret = context.env.CDK_SESSION_SECRET?.trim();
   if (!secret) {
@@ -153,32 +169,62 @@ export const onRequestPost = async (context: CdkContext): Promise<Response> => {
     checkout_ui_mode: "hosted",
   };
 
+  const relayUrl = context.env.CHATGPT_RELAY_URL?.trim() || "";
+  const relaySecret = context.env.CHATGPT_RELAY_SECRET?.trim() || "";
+  if (Boolean(relayUrl) !== Boolean(relaySecret)) {
+    return json({
+      ok: false,
+      error: "relay_configuration_invalid",
+      message: "国家中继配置不完整，请联系管理员",
+    }, 503);
+  }
+  if (relayUrl && !validRelayUrl(relayUrl)) {
+    return json({
+      ok: false,
+      error: "relay_configuration_invalid",
+      message: "国家中继地址配置无效，请联系管理员",
+    }, 503);
+  }
+
   const abortController = new AbortController();
   const timeout = setTimeout(() => abortController.abort(), 25_000);
   let response: Response;
+  const useRelay = Boolean(relayUrl && relaySecret);
   try {
-    response = await fetch(CHATGPT_CHECKOUT_URL, {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${accessToken}`,
-        "content-type": "application/json",
-        origin: "https://chatgpt.com",
-        referer: "https://chatgpt.com/",
-      },
-      body: JSON.stringify(payload),
-      signal: abortController.signal,
-    });
+    response = useRelay
+      ? await postRelayCheckout(relayUrl, { country, accessToken, payload }, relaySecret, abortController.signal)
+      : await fetch(CHATGPT_CHECKOUT_URL, {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+          origin: "https://chatgpt.com",
+          referer: "https://chatgpt.com/",
+        },
+        body: JSON.stringify(payload),
+        signal: abortController.signal,
+      });
   } catch {
     clearTimeout(timeout);
-    return json({ ok: false, error: "chatgpt_unavailable", message: "无法连接 ChatGPT 结账服务，请稍后重试" }, 502);
+    return useRelay
+      ? json({ ok: false, error: "relay_unavailable", message: "无法连接国家中继服务，请稍后重试" }, 502)
+      : json({ ok: false, error: "chatgpt_unavailable", message: "无法连接 ChatGPT 结账服务，请稍后重试" }, 502);
   }
   clearTimeout(timeout);
 
   const data = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok) {
+    if (useRelay) {
+      const failure = relayFailure(data);
+      return json({ ok: false, error: failure.error, message: failure.message }, failure.status);
+    }
     const failure = upstreamMessage(response.status);
     return json({ ok: false, error: failure.error, message: failure.message }, failure.status);
+  }
+
+  if (useRelay && (data.ok !== true || data.country !== country || data.network !== "country-relay")) {
+    return json({ ok: false, error: "relay_invalid_response", message: "国家中继返回了无效响应，请稍后重试" }, 502);
   }
 
   const rawUrl = [data.url, data.stripe_hosted_url, data.checkout_url].find((value): value is string => typeof value === "string");
@@ -196,11 +242,15 @@ export const onRequestPost = async (context: CdkContext): Promise<Response> => {
   return json({
     ok: true,
     url: checkoutUrl.href,
-    checkoutSessionId: typeof data.checkout_session_id === "string" ? data.checkout_session_id : null,
+    checkoutSessionId: useRelay
+      ? (typeof data.checkoutSessionId === "string" ? data.checkoutSessionId : null)
+      : (typeof data.checkout_session_id === "string" ? data.checkout_session_id : null),
     country,
     currency,
-    network: "direct",
-    note: "服务端按所选地区提交账单参数；Cloudflare Pages 无法把出口 IP 切换为第三方 IP 池中的地址。",
+    network: useRelay ? "country-relay" : "direct",
+    note: useRelay
+      ? "结账请求已由服务端通过所选国家的中继出口发送。"
+      : "服务端按所选地区提交账单参数。",
   });
 };
 

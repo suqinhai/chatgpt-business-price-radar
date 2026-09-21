@@ -10,8 +10,8 @@
 - 仅展示标准 ChatGPT Business 月付价格，不包含年付或非营利套餐。
 - 显示官方原币价格、人民币/美元估算、含税或未含税口径。
 - 支持搜索、筛选、排序以及桌面表格和移动端卡片。
-- 从任意地区一键带入国家和货币，由服务端请求 ChatGPT 并返回可访问的 Team 结账链接。
-- Team 优惠生成器支持 39 种货币、已有空间 UUID、实时预览、复制和 `.js` 下载。
+- 从任意地区一键带入国家和货币；配置国家中继后，由服务端经对应国家出口请求 ChatGPT 并返回 Team 结账链接。
+- Team 优惠生成器支持 39 种货币、已有空间 UUID、实时预览和支付链接复制。
 - Codex 按量生成器支持空间名称、Credit 数量和国家到货币自动匹配。
 - 账单查询生成器可查询最近 10 条发票、支付方式和账单资料。
 - 优惠码和手动提供的 Token 只在生成请求期间转发，不写入网址、Local Storage 或数据库；服务端不会记录 Token。
@@ -65,17 +65,26 @@ npm run build
 
 Team 优惠生成器默认使用 `US / EGP`；已有空间 UUID 可选，优惠码和 Token 不会出现在网址中。
 
-生成器允许粘贴原始 `accessToken` 或 `/api/auth/session` 返回的完整 JSON；服务端只提取其中的 `accessToken`，在内存中的单次请求里调用 ChatGPT 的 checkout 接口，随后只返回 HTTPS 支付链接。服务端不保存 Token，也不会把 Token 写入生成的链接。
+生成器允许粘贴原始 `accessToken` 或 `/api/auth/session` 返回的完整 JSON；服务端只提取其中的 `accessToken`，在内存中的单次 checkout 请求里使用，随后只返回 HTTPS 支付链接。服务端不保存 Token，也不会把 Token 写入生成的链接、日志、数据库或错误响应。
 
-页面仍保留“下载脚本”作为故障排查和手动执行的后备方式，但主按钮是“生成支付链接”。账单结果可能包含敏感付款资料，请勿分享控制台输出。请仅在有权操作的账号中使用，并以实际 ChatGPT 页面结果为准。
+主流程只提供服务端生成支付链接，不再生成把 Access Token 带入浏览器执行的 checkout 脚本。账单结果可能包含敏感付款资料，请勿分享控制台输出。请仅在有权操作的账号中使用，并以实际 ChatGPT 页面结果为准。
 
-### 服务端链接生成与 IP 池边界
+### 服务端链接生成与国家中继
 
-`POST /api/checkout/generate` 会使用激活 CDK 后签发的短期 activation token，校验国家、货币、优惠码和 Access Token，然后请求 `https://chatgpt.com/backend-api/payments/checkout`。请求体中的 `billing_details.country` 和 `billing_details.currency` 按页面选择提交。
+`POST /api/checkout/generate` 会使用激活 CDK 后签发的短期 activation token，校验国家、货币、优惠码和 Access Token。启用国家中继后，Pages Function 会在服务端把项目原有 checkout payload、所选国家和 Access Token 发给中继；`country` 会标准化为大写两位代码，并始终与 `payload.billing_details.country` 一致。
 
-用户提供的 `https://zip.cm.edu.kg.cmliussss.net/all.json` 是 IP/地理位置清单：条目包含 IP、端口和探测元数据，并不是一个可直接供 Cloudflare Pages 使用的 HTTP/SOCKS 代理协议。Cloudflare Worker 也不能通过设置请求头把自身出口 IP 伪装成清单中的地址，因此本项目不会把这些地址当作代理或用于绕过 ChatGPT 的地区、风控或账户限制。若确有合规的企业网络需求，应部署自己控制的代理/中继服务并由管理员审核其法律、服务条款和日志策略；不要把第三方 IP 清单直接接入生产支付流程。
+每个中继 POST 都使用新的 24 字节随机 nonce，并对 `timestamp.nonce.rawBody` 做 HMAC-SHA256 签名。签名后的 `rawBody` 会原样发送；checkout POST 不自动重试，也不跟随重定向。中继 URL 只能来自服务端环境变量，浏览器请求不能指定或覆盖目标地址，因此该接口不会成为任意 URL 代理。
 
 要启用服务端链接生成，请在 Cloudflare Pages 设置 `CDK_SESSION_SECRET`（随机长密钥），然后重新部署。该密钥用于签发有效期约 15 分钟的 activation token；缺少密钥时，CDK 激活和生成接口会返回配置错误，而不会消耗 CDK。
+
+国家中继采用成对配置：
+
+- `CHATGPT_RELAY_URL`：已部署的 HTTPS checkout 中继端点。
+- `CHATGPT_RELAY_SECRET`：与中继共享的 HMAC 密钥，只能存放在服务端 Secret 中。
+
+两项都存在时使用国家中继；只存在一项时返回 `relay_configuration_invalid`，不会静默直连；两项都不存在时保留原有的 ChatGPT 直连行为。不要在 `wrangler.jsonc`、前端 `VITE_*` 变量、仓库文件或 CI 日志中写入真实密钥。
+
+中继的已知错误会被转换为不含上游原文、Access Token、代理地址或堆栈的安全响应，包括签名/时间错误、Token 无效、nonce 重放、限流、国家出口不可用、连接/上游异常和 checkout 参数拒绝。
 
 ### CDK 发放与验证
 
@@ -108,11 +117,12 @@ GitHub 可能在公开仓库连续 60 天没有活动后停用定时工作流；
    - `CLOUDFLARE_API_TOKEN`：上一步生成的 API Token。
    - `CLOUDFLARE_ACCOUNT_ID`：Cloudflare 账户 ID。
 4. 如果 Pages 项目不是默认名称，在同一页面的 **Variables** 中添加 `CLOUDFLARE_PAGES_PROJECT`，值为实际项目名。
-5. 打开 **Actions → Refresh prices and deploy Cloudflare Pages → Run workflow**，执行首次发布。
+5. 在 Pages 项目的服务端设置 `CDK_SESSION_SECRET`、`CHATGPT_RELAY_URL` 和 `CHATGPT_RELAY_SECRET`；真实值不要提交到仓库或配置为 `VITE_*` 变量。
+6. 打开 **Actions → Refresh prices and deploy Cloudflare Pages → Run workflow**，执行首次发布。
 
 首次发布前，工作流会从 `https://<项目名>.pages.dev/data/prices.json` 读取上一份快照；如果没有快照，会使用首次覆盖率保护（至少 20 个有效地区）。采价或覆盖率检查失败时不会覆盖线上版本。
 
-Cloudflare Pages 的 Direct Upload 支持通过 Wrangler 和 GitHub Actions 持续部署。静态资源不会消耗 Pages Functions 的请求额度；项目本身不需要 Pages Function。
+Cloudflare Pages 的 Direct Upload 支持通过 Wrangler 和 GitHub Actions 持续部署。静态资源不会消耗 Pages Functions 的请求额度；CDK 和 checkout 接口由 Pages Functions 提供。
 
 ## 计费与免责声明
 

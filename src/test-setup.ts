@@ -1,4 +1,8 @@
 import "@testing-library/jest-dom/vitest";
 
-Object.defineProperty(window, "scrollTo", { value: () => undefined, writable: true });
-Object.defineProperty(Element.prototype, "scrollIntoView", { value: () => undefined, writable: true });
+if (typeof window !== "undefined") {
+  Object.defineProperty(window, "scrollTo", { value: () => undefined, writable: true });
+}
+if (typeof Element !== "undefined") {
+  Object.defineProperty(Element.prototype, "scrollIntoView", { value: () => undefined, writable: true });
+}

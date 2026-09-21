@@ -3,7 +3,6 @@ import {
   Check,
   Code2,
   Copy,
-  Download,
   ExternalLink,
   Info,
   KeyRound,
@@ -19,7 +18,6 @@ import {
   DEFAULT_ACCESS_TOKEN_MODE,
   DEFAULT_CHECKOUT_COUNTRY,
   DEFAULT_CHECKOUT_CURRENCY,
-  generateCheckoutScript,
   isSupportedCheckoutCurrency,
   normalizeIsoInput,
   validateCheckoutInput,
@@ -135,22 +133,6 @@ export default function CheckoutGenerator({
   };
 
   const currentErrors = () => validateCheckoutInput(checkoutInput);
-  const source = useMemo(() => {
-    const previewToken = accessTokenMode === "manual"
-      ? accessToken.trim() || "PASTE_ACCESS_TOKEN_HERE"
-      : "";
-    return generateCheckoutScript({
-      ...checkoutInput,
-      coupon: checkoutInput.coupon || "XXXXXXXXXXXX",
-      country: /^[A-Z]{2}$/.test(checkoutInput.country) ? checkoutInput.country : DEFAULT_CHECKOUT_COUNTRY,
-      currency: isSupportedCheckoutCurrency(checkoutInput.currency) ? checkoutInput.currency : DEFAULT_CHECKOUT_CURRENCY,
-      existingWorkspaceId: currentErrors().existingWorkspaceId ? "" : checkoutInput.existingWorkspaceId,
-      accessToken: previewToken,
-    });
-  }, [coupon, country, currency, existingWorkspaceId, autoOpen, accessTokenMode, accessToken, selectedCountry?.countryCode, selectedCountry?.currencyCode]);
-
-  const isInputValid = Object.keys(currentErrors()).length === 0;
-
   const clearError = (field: FormField) => {
     if (!errors[field]) return;
     setErrors((current) => ({ ...current, [field]: undefined }));
@@ -166,19 +148,19 @@ export default function CheckoutGenerator({
     clearError("currency");
   };
 
-  const focusField = (field: FormField, legacy = false) => {
-    if (field === "coupon") (legacy ? couponRef.current : visibleCouponRef.current)?.focus();
+  const focusField = (field: FormField) => {
+    if (field === "coupon") visibleCouponRef.current?.focus();
     if (field === "country") countryRef.current?.focus();
     if (field === "currency") currencyRef.current?.focus();
     if (field === "existingWorkspaceId") workspaceIdRef.current?.focus();
-    if (field === "accessToken") (legacy ? accessTokenRef.current : visibleTokenRef.current)?.focus();
+    if (field === "accessToken") visibleTokenRef.current?.focus();
   };
 
-  const validateAndFocus = (legacy = false) => {
+  const validateAndFocus = () => {
     const nextErrors = currentErrors();
     setErrors(nextErrors);
     const firstError = Object.keys(nextErrors)[0] as FormField | undefined;
-    if (firstError) focusField(firstError, legacy);
+    if (firstError) focusField(firstError);
     return !firstError;
   };
 
@@ -278,29 +260,6 @@ export default function CheckoutGenerator({
     }
   };
 
-  const copyCode = async () => {
-    if (!validateAndFocus(true)) {
-      setNotice("请先完成必填参数");
-      return;
-    }
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
-      await navigator.clipboard.writeText(source);
-    } catch {
-      const textarea = document.createElement("textarea");
-      textarea.value = source;
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand?.("copy");
-      textarea.remove();
-    }
-    setCopied(true);
-    setNotice("完整代码已复制到剪贴板");
-    window.setTimeout(() => setCopied(false), 1800);
-  };
-
   const copyLink = async () => {
     if (!generatedUrl) return;
     try {
@@ -319,21 +278,6 @@ export default function CheckoutGenerator({
     setCopied(true);
     setNotice("支付链接已复制");
     window.setTimeout(() => setCopied(false), 1800);
-  };
-
-  const downloadCode = () => {
-    if (!validateAndFocus(true)) {
-      setNotice("请先完成必填参数");
-      return;
-    }
-    const blob = new Blob([source], { type: "text/javascript;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "chatgpt-team-checkout.js";
-    link.click();
-    URL.revokeObjectURL(url);
-    setNotice("代码文件已下载");
   };
 
   const reset = () => {
@@ -491,7 +435,7 @@ export default function CheckoutGenerator({
               <li>打开 <a href="https://chatgpt.com/api/auth/session" target="_blank" rel="noreferrer">chatgpt.com/api/auth/session <ExternalLink size={11} /></a></li>
               <li>复制其中的 <code>accessToken</code>，或者复制整页 JSON 粘贴到下方。</li>
             </ol>
-            <p className="network-note">网络说明：服务端会按所选国家提交账单参数；第三方 IP 清单不是可直接使用的代理，因此不会被当作出口 IP 接入。</p>
+            <p className="network-note">网络说明：服务端会按所选国家提交账单参数；管理员配置国家中继后，checkout 请求会从对应国家出口发出。</p>
           </div>
 
           <label className={`direct-token-slot ${errors.accessToken ? "has-error" : ""}`}>
@@ -531,9 +475,7 @@ export default function CheckoutGenerator({
                 <a href={generatedUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} /> 打开支付页</a>
               </div>
               <div className="generated-fallback">
-                <span>需要手动排查时：</span>
-                <button type="button" onClick={downloadCode}><Download size={13} /> 下载脚本</button>
-                <button type="button" onClick={copyCode}><Copy size={13} /> 复制脚本</button>
+                <span>checkout 请求已由服务端发送；Access Token 不会写入浏览器脚本或支付链接。</span>
               </div>
             </section>
           ) : null}
@@ -549,8 +491,6 @@ export default function CheckoutGenerator({
         <label><input type="radio" name="access-token-mode" checked={accessTokenMode === "manual"} onChange={() => setAccessTokenMode("manual")} /> 手动粘贴</label>
         {accessTokenMode === "manual" ? <input ref={accessTokenRef} value={accessToken} onChange={(event) => setAccessToken(event.target.value)} placeholder="粘贴 accessToken 或完整 Session JSON" /> : null}
         <label><input type="checkbox" checked={autoOpen} onChange={(event) => setAutoOpen(event.target.checked)} /> 生成成功后自动打开支付页面</label>
-        <button type="button" onClick={downloadCode} aria-disabled={!isInputValid}><Download size={14} /> 下载</button>
-        <button type="button" onClick={copyCode} aria-disabled={!isInputValid}>{copied ? <Check size={14} /> : <Copy size={14} />} {copied ? "已复制" : "复制代码"}</button>
         <button type="button" onClick={reset}><RotateCcw size={13} /> 恢复默认值</button>
       </section>
 

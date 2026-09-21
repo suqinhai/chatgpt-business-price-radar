@@ -26,6 +26,10 @@ export type CdkEnv = {
   CDK_ADMIN_TOKEN?: string;
   /** Secret used to mint short-lived, in-memory checkout activation grants. */
   CDK_SESSION_SECRET?: string;
+  /** Server-only checkout relay endpoint. It is never accepted from a browser request. */
+  CHATGPT_RELAY_URL?: string;
+  /** Server-only HMAC secret shared with the checkout relay. */
+  CHATGPT_RELAY_SECRET?: string;
 };
 
 export type CdkContext = {

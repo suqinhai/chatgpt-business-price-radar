@@ -1,2 +1,4 @@
 CDK_ADMIN_TOKEN=replace-with-a-long-random-admin-token
 CDK_SESSION_SECRET=replace-with-a-different-long-random-session-secret
+CHATGPT_RELAY_URL=https://kspskpms.pages.dev/internal/chatgpt/checkout
+CHATGPT_RELAY_SECRET=replace-with-the-relay-hmac-secret

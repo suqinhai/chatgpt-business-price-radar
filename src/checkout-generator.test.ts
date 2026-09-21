@@ -4,13 +4,12 @@ import {
   DEFAULT_CHECKOUT_COUNTRY,
   DEFAULT_CHECKOUT_CURRENCY,
   extractAccessToken,
-  generateCheckoutScript,
   isSupportedCheckoutCurrency,
   normalizeIsoInput,
   validateCheckoutInput,
 } from "./checkout-generator";
 
-describe("checkout script generator", () => {
+describe("checkout form validation", () => {
   it("keeps the requested defaults and exact supported currency list", () => {
     expect(DEFAULT_CHECKOUT_COUNTRY).toBe("US");
     expect(DEFAULT_CHECKOUT_CURRENCY).toBe("EGP");
@@ -37,25 +36,6 @@ describe("checkout script generator", () => {
       });
   });
 
-  it("substitutes and safely escapes all generated values", () => {
-    const script = generateCheckoutScript({
-      coupon: 'SAVE "20" & 更多',
-      country: "SG",
-      currency: "SGD",
-      existingWorkspaceId: "",
-      autoOpen: false,
-      accessTokenMode: "auto",
-      accessToken: "",
-    });
-
-    expect(script).toContain('const COUPON = "SAVE \\"20\\" & 更多"');
-    expect(script).toContain('country: "SG"');
-    expect(script).toContain('currency: "SGD"');
-    expect(script).toContain("promo_code: COUPON");
-    expect(script).toContain("promoCode=SAVE%20%2220%22%20%26%20%E6%9B%B4%E5%A4%9A");
-    expect(() => new Function(script)).not.toThrow();
-  });
-
   it("accepts a raw access token or extracts one from complete session JSON", () => {
     expect(extractAccessToken("  eyJraw.token  ")).toBe("eyJraw.token");
     expect(extractAccessToken(JSON.stringify({ user: { name: "Kai" }, accessToken: "eyJsession.token" })))
@@ -64,28 +44,6 @@ describe("checkout script generator", () => {
       .toBe("nested-token");
     expect(extractAccessToken('{"user":true}')).toBeNull();
     expect(extractAccessToken("{")).toBeNull();
-  });
-
-  it("writes only the extracted token in manual mode and removes the session fetch", () => {
-    const sessionJson = JSON.stringify({
-      user: { email: "private@example.com" },
-      accessToken: 'eyJmanual."token"',
-      expires: "2099-01-01",
-    });
-    const script = generateCheckoutScript({
-      coupon: "SAVE20",
-      country: "US",
-      currency: "EGP",
-      existingWorkspaceId: "",
-      autoOpen: false,
-      accessTokenMode: "manual",
-      accessToken: sessionJson,
-    });
-
-    expect(script).toContain('const accessToken = "eyJmanual.\\"token\\""');
-    expect(script).not.toContain("/api/auth/session");
-    expect(script).not.toContain("private@example.com");
-    expect(() => new Function(script)).not.toThrow();
   });
 
   it("requires an extractable token in manual mode", () => {
@@ -100,20 +58,4 @@ describe("checkout script generator", () => {
     })).toEqual({ accessToken: "未能从输入内容中提取 accessToken" });
   });
 
-  it("adds an existing workspace UUID and optional auto-open behavior", () => {
-    const workspaceId = "123e4567-e89b-12d3-a456-426614174000";
-    const script = generateCheckoutScript({
-      coupon: "SAVE20",
-      country: "US",
-      currency: "USD",
-      existingWorkspaceId: workspaceId,
-      autoOpen: true,
-      accessTokenMode: "auto",
-      accessToken: "",
-    });
-    expect(script).toContain(`const EXISTING_WORKSPACE_ID = "${workspaceId}"`);
-    expect(script).toContain("existing_workspace_id: EXISTING_WORKSPACE_ID");
-    expect(script).toContain("const AUTO_OPEN_CHECKOUT = true");
-    expect(() => new Function(script)).not.toThrow();
-  });
 });
