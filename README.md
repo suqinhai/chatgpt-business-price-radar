@@ -10,11 +10,11 @@
 - 仅展示标准 ChatGPT Business 月付价格，不包含年付或非营利套餐。
 - 显示官方原币价格、人民币/美元估算、含税或未含税口径。
 - 支持搜索、筛选、排序以及桌面表格和移动端卡片。
-- 从任意地区一键带入国家和货币，生成 ChatGPT Team 结账脚本。
+- 从任意地区一键带入国家和货币，由服务端请求 ChatGPT 并返回可访问的 Team 结账链接。
 - Team 优惠生成器支持 39 种货币、已有空间 UUID、实时预览、复制和 `.js` 下载。
 - Codex 按量生成器支持空间名称、Credit 数量和国家到货币自动匹配。
 - 账单查询生成器可查询最近 10 条发票、支付方式和账单资料。
-- 优惠码和手动提供的 Token 仅在当前浏览器内处理，不写入网址或本地存储。
+- 优惠码和手动提供的 Token 只在生成请求期间转发，不写入网址、Local Storage 或数据库；服务端不会记录 Token。
 - GitHub Actions 每两天刷新，结构异常或覆盖率骤降时停止部署。
 - 单个地区暂时失败时，最多沿用 14 天的上次成功结果并标记为“数据暂旧”。
 
@@ -65,9 +65,17 @@ npm run build
 
 Team 优惠生成器默认使用 `US / EGP`；已有空间 UUID 可选，优惠码和 Token 不会出现在网址中。
 
-生成脚本支持在运行时从登录 Session 自动获取 Access Token，也可以手动粘贴原始 `accessToken` 或 `/api/auth/session` 返回的完整 JSON；完整 JSON 只会提取其中的 `accessToken` 写入脚本。
+生成器允许粘贴原始 `accessToken` 或 `/api/auth/session` 返回的完整 JSON；服务端只提取其中的 `accessToken`，在内存中的单次请求里调用 ChatGPT 的 checkout 接口，随后只返回 HTTPS 支付链接。服务端不保存 Token，也不会把 Token 写入生成的链接。
 
-生成器只生成文本，不会在本站请求登录凭证、支付或账单接口，也不会代替用户执行代码。账单结果可能包含敏感付款资料，请勿分享控制台输出。请仅在有权操作的账号中使用，并以实际 ChatGPT 页面结果为准。
+页面仍保留“下载脚本”作为故障排查和手动执行的后备方式，但主按钮是“生成支付链接”。账单结果可能包含敏感付款资料，请勿分享控制台输出。请仅在有权操作的账号中使用，并以实际 ChatGPT 页面结果为准。
+
+### 服务端链接生成与 IP 池边界
+
+`POST /api/checkout/generate` 会使用激活 CDK 后签发的短期 activation token，校验国家、货币、优惠码和 Access Token，然后请求 `https://chatgpt.com/backend-api/payments/checkout`。请求体中的 `billing_details.country` 和 `billing_details.currency` 按页面选择提交。
+
+用户提供的 `https://zip.cm.edu.kg.cmliussss.net/all.json` 是 IP/地理位置清单：条目包含 IP、端口和探测元数据，并不是一个可直接供 Cloudflare Pages 使用的 HTTP/SOCKS 代理协议。Cloudflare Worker 也不能通过设置请求头把自身出口 IP 伪装成清单中的地址，因此本项目不会把这些地址当作代理或用于绕过 ChatGPT 的地区、风控或账户限制。若确有合规的企业网络需求，应部署自己控制的代理/中继服务并由管理员审核其法律、服务条款和日志策略；不要把第三方 IP 清单直接接入生产支付流程。
+
+要启用服务端链接生成，请在 Cloudflare Pages 设置 `CDK_SESSION_SECRET`（随机长密钥），然后重新部署。该密钥用于签发有效期约 15 分钟的 activation token；缺少密钥时，CDK 激活和生成接口会返回配置错误，而不会消耗 CDK。
 
 ### CDK 发放与验证
 

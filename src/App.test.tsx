@@ -23,6 +23,7 @@ describe("application routes", () => {
 
     expect(await screen.findByRole("heading", { name: "Business 长链生成" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "价格雷达" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "CDK 管理" })).not.toBeInTheDocument();
     expect(screen.queryByText("一眼看懂，全球月付差多少。")).not.toBeInTheDocument();
     expect(window.location.pathname).toBe("/");
   });

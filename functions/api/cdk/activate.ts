@@ -8,11 +8,20 @@ import {
   normalizeCode,
   nowIso,
   readJson,
+  createActivationToken,
   type CdkContext,
 } from "./_shared";
 
 export const onRequestPost = async (context: CdkContext): Promise<Response> => {
   if (!context.env.CDK_DB) return databaseUnavailable();
+  const sessionSecret = context.env.CDK_SESSION_SECRET?.trim();
+  if (!sessionSecret) {
+    return json({
+      ok: false,
+      error: "checkout_service_unconfigured",
+      message: "支付链接服务尚未完成配置，请联系管理员",
+    }, 503);
+  }
 
   let body: Record<string, unknown>;
   try {
@@ -56,6 +65,7 @@ export const onRequestPost = async (context: CdkContext): Promise<Response> => {
     message: "CDK 激活成功",
     expiresAt: record.expires_at,
     remainingUses: Math.max(0, record.max_uses - record.used_count - 1),
+    activationToken: await createActivationToken(record.id, sessionSecret),
   });
 };
 

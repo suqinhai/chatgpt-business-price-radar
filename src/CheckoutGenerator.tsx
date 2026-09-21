@@ -7,7 +7,9 @@ import {
   ExternalLink,
   Info,
   KeyRound,
+  Link2,
   LockKeyhole,
+  LoaderCircle,
   MapPin,
   RotateCcw,
   Search,
@@ -72,10 +74,14 @@ export default function CheckoutGenerator({
   const [errors, setErrors] = useState<FormErrors>({});
   const [notice, setNotice] = useState("");
   const [activationCode, setActivationCode] = useState("");
+  const [activationToken, setActivationToken] = useState("");
   const [cdkActivated, setCdkActivated] = useState(false);
   const [activationBusy, setActivationBusy] = useState(false);
   const [activationError, setActivationError] = useState("");
   const [generated, setGenerated] = useState(false);
+  const [generatedUrl, setGeneratedUrl] = useState("");
+  const [generationBusy, setGenerationBusy] = useState(false);
+  const [generationError, setGenerationError] = useState("");
   const [copied, setCopied] = useState(false);
 
   const activationRef = useRef<HTMLInputElement>(null);
@@ -92,6 +98,8 @@ export default function CheckoutGenerator({
     setCurrency(initialCurrency || DEFAULT_CHECKOUT_CURRENCY);
     setErrors({});
     setGenerated(false);
+    setGeneratedUrl("");
+    setGenerationError("");
   }, [initialCountry, initialCurrency]);
 
   useEffect(() => {
@@ -152,6 +160,8 @@ export default function CheckoutGenerator({
     setCountry(row.countryCode);
     setCurrency(row.currencyCode);
     setGenerated(false);
+    setGeneratedUrl("");
+    setGenerationError("");
     clearError("country");
     clearError("currency");
   };
@@ -172,7 +182,7 @@ export default function CheckoutGenerator({
     return !firstError;
   };
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     if (!cdkActivated) {
       activationRef.current?.focus();
       setNotice("请先激活 CDK");
@@ -195,8 +205,44 @@ export default function CheckoutGenerator({
       setNotice("请检查标红的参数");
       return;
     }
-    setGenerated(true);
-    setNotice("支付链接脚本已生成");
+    if (!activationToken) {
+      setNotice("支付链接服务尚未完成配置，请联系管理员");
+      return;
+    }
+
+    setGenerationBusy(true);
+    setGenerationError("");
+    setGenerated(false);
+    setGeneratedUrl("");
+    try {
+      const response = await fetch("/api/checkout/generate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          activationToken,
+          coupon: checkoutInput.coupon,
+          country: checkoutInput.country,
+          currency: checkoutInput.currency,
+          existingWorkspaceId: checkoutInput.existingWorkspaceId,
+          accessToken: checkoutInput.accessToken,
+        }),
+      });
+      const payload = await response.json().catch(() => ({})) as { ok?: boolean; url?: string; message?: string };
+      if (!response.ok || !payload.ok || !payload.url) {
+        throw new Error(payload.message || "支付链接生成失败，请稍后重试");
+      }
+      setGeneratedUrl(payload.url);
+      setGenerated(true);
+      setNotice("支付链接已生成");
+    } catch (error) {
+      const message = error instanceof Error && error.message !== "Failed to fetch"
+        ? error.message
+        : "支付链接服务暂时不可用，请稍后重试";
+      setGenerationError(message);
+      setNotice(message);
+    } finally {
+      setGenerationBusy(false);
+    }
   };
 
   const activateCode = async () => {
@@ -214,8 +260,10 @@ export default function CheckoutGenerator({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ code }),
       });
-      const payload = await response.json().catch(() => ({})) as { ok?: boolean; message?: string };
+      const payload = await response.json().catch(() => ({})) as { ok?: boolean; message?: string; activationToken?: string };
       if (!response.ok || !payload.ok) throw new Error(payload.message || "CDK 无效、已过期或已使用");
+      if (!payload.activationToken) throw new Error("支付链接服务尚未完成配置，请联系管理员");
+      setActivationToken(payload.activationToken);
       setCdkActivated(true);
       setNotice("CDK 已激活，可以生成支付长链");
     } catch (error) {
@@ -253,6 +301,26 @@ export default function CheckoutGenerator({
     window.setTimeout(() => setCopied(false), 1800);
   };
 
+  const copyLink = async () => {
+    if (!generatedUrl) return;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
+      await navigator.clipboard.writeText(generatedUrl);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = generatedUrl;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand?.("copy");
+      textarea.remove();
+    }
+    setCopied(true);
+    setNotice("支付链接已复制");
+    window.setTimeout(() => setCopied(false), 1800);
+  };
+
   const downloadCode = () => {
     if (!validateAndFocus(true)) {
       setNotice("请先完成必填参数");
@@ -277,10 +345,14 @@ export default function CheckoutGenerator({
     setAccessTokenMode(DEFAULT_ACCESS_TOKEN_MODE);
     setAccessToken("");
     setActivationCode("");
+    setActivationToken("");
     setCdkActivated(false);
     setActivationBusy(false);
     setActivationError("");
     setGenerated(false);
+    setGeneratedUrl("");
+    setGenerationBusy(false);
+    setGenerationError("");
     setErrors({});
     setNotice("已恢复默认值");
   };
@@ -315,6 +387,7 @@ export default function CheckoutGenerator({
               value={activationCode}
               onChange={(event) => {
                 setActivationCode(event.target.value);
+                setActivationToken("");
                 setCdkActivated(false);
                 setActivationError("");
               }}
@@ -418,6 +491,7 @@ export default function CheckoutGenerator({
               <li>打开 <a href="https://chatgpt.com/api/auth/session" target="_blank" rel="noreferrer">chatgpt.com/api/auth/session <ExternalLink size={11} /></a></li>
               <li>复制其中的 <code>accessToken</code>，或者复制整页 JSON 粘贴到下方。</li>
             </ol>
+            <p className="network-note">网络说明：服务端会按所选国家提交账单参数；第三方 IP 清单不是可直接使用的代理，因此不会被当作出口 IP 接入。</p>
           </div>
 
           <label className={`direct-token-slot ${errors.accessToken ? "has-error" : ""}`}>
@@ -439,19 +513,27 @@ export default function CheckoutGenerator({
             {errors.accessToken ? <em role="alert">{errors.accessToken}</em> : null}
           </label>
 
-          <button className="direct-generate-button" type="button" disabled={!cdkActivated} onClick={handleGenerate}>
-            <LockKeyhole size={16} /> {cdkActivated ? "生成支付链接" : "激活 CDK 后生成"}
+          <button className="direct-generate-button" type="button" disabled={!cdkActivated || generationBusy} onClick={handleGenerate}>
+            {generationBusy ? <LoaderCircle className="spin" size={16} /> : <LockKeyhole size={16} />} {generationBusy ? "正在生成…" : cdkActivated ? "生成支付链接" : "激活 CDK 后生成"}
           </button>
 
-          {generated ? (
+          {generationError ? <p className="generation-error" role="alert">{generationError}</p> : null}
+
+          {generated && generatedUrl ? (
             <section className="generated-output" aria-label="生成结果">
               <div>
-                <span>支付脚本已就绪</span>
-                <small>复制后在已登录 ChatGPT 的页面控制台中运行</small>
+                <span><Link2 size={15} /> 支付链接已生成</span>
+                <small>服务端已按所选国家和货币提交结账请求，请打开后核对金额。</small>
               </div>
+              <a className="generated-link" href={generatedUrl} target="_blank" rel="noreferrer">{generatedUrl}</a>
               <div className="generated-actions">
-                <button type="button" onClick={downloadCode}><Download size={14} /> 下载</button>
-                <button type="button" onClick={copyCode}>{copied ? <Check size={14} /> : <Copy size={14} />} {copied ? "已复制" : "复制代码"}</button>
+                <button type="button" onClick={copyLink}>{copied ? <Check size={14} /> : <Copy size={14} />} {copied ? "已复制链接" : "复制支付链接"}</button>
+                <a href={generatedUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} /> 打开支付页</a>
+              </div>
+              <div className="generated-fallback">
+                <span>需要手动排查时：</span>
+                <button type="button" onClick={downloadCode}><Download size={13} /> 下载脚本</button>
+                <button type="button" onClick={copyCode}><Copy size={13} /> 复制脚本</button>
               </div>
             </section>
           ) : null}

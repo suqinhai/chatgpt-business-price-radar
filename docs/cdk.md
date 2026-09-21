@@ -22,7 +22,15 @@
    npx wrangler pages secret put CDK_ADMIN_TOKEN --project-name=chatgpt-business-price-radar
    ```
 
-4. 重新部署 Pages。绑定修改后必须重新部署，Pages Function 才能读取 `CDK_DB`。
+4. 设置用于短期生成授权的随机密钥。它与管理员密钥用途不同：
+
+   ```bash
+   npx wrangler pages secret put CDK_SESSION_SECRET --project-name=chatgpt-business-price-radar
+   ```
+
+   `CDK_SESSION_SECRET` 不会返回给浏览器；激活成功后只会签发一个约 15 分钟有效的 activation token。
+
+5. 重新部署 Pages。绑定或 Secret 修改后必须重新部署，Pages Function 才能读取新配置。
 
 本地调试时可以复制 `.dev.vars.example` 为 `.dev.vars`，再使用 Pages Functions 的本地服务器并传入 D1 绑定：
 
@@ -83,6 +91,14 @@ npm run cdk:issue
 
 服务端会校验格式、哈希、撤销状态、过期时间和剩余次数，并使用带条件的 SQL 更新保证并发激活不会重复消耗。默认 `maxUses` 是 1；激活失败不会改变使用次数。
 
+配置 `CDK_SESSION_SECRET` 后，响应还会包含短期 `activationToken`。该 token 仅用于下一步服务端生成请求，不包含 CDK 明文。
+
+## 服务端生成支付链接
+
+前端会把激活 token、所选国家和货币、优惠码、已有空间 ID（可选）以及用户主动粘贴的 Access Token 发送到 `POST /api/checkout/generate`。接口在内存中提取 Access Token，调用 ChatGPT 的 checkout API，并只返回 HTTPS 支付链接；不会把 Access Token 写入 D1、URL 或日志。
+
+该接口提交的是 ChatGPT checkout payload 的 `billing_details`，不是 IP 伪装。Cloudflare Pages 无法把出口地址切换成任意第三方 IP 清单中的地址；`all.json` 中的 IP/端口条目也不等同于可用的 HTTP/SOCKS 代理，不能直接用于服务端登录或绕过地区限制。
+
 ## 管理和撤销
 
 - `GET /api/cdk/admin/list?limit=50&offset=0`：分页查看前缀、使用次数、过期和撤销状态，响应中的 `total` 用于计算总页数；接口不返回明文 CDK。
@@ -90,4 +106,4 @@ npm run cdk:issue
 
 ## 当前边界
 
-当前项目的 JavaScript 生成器仍然是在浏览器本地生成文本。CDK 已经可以真实发放和服务端验证，页面的“直接生成支付链接”按钮会要求激活成功；如果要让服务端从技术上阻止绕过前端直接生成脚本，还需要把最终支付链接生成接口也迁移到 Pages Function，并在该接口再次校验激活凭据。
+页面仍保留浏览器本地脚本作为后备输出，但“直接生成支付链接”已经走 Pages Function。请只在你有权操作的账号中使用；第三方接口、促销资格和 ChatGPT 风控规则可能调整，最终结果以 ChatGPT 结账页为准。

@@ -176,9 +176,11 @@ export default function App() {
         </button>
         <div className="topbar-actions">
           {route.view === "prices" ? <span className="source-pill"><span className="live-dot" /> OpenAI 公开配置</span> : null}
-          <button className={`admin-nav-button ${route.view === "admin" ? "active" : ""}`} type="button" onClick={() => navigate(route.view === "admin" ? "generator" : "admin")}>
-            <KeyRound size={15} /> {route.view === "admin" ? "返回首页" : "CDK 管理"}
-          </button>
+          {route.view === "admin" ? (
+            <button className="admin-nav-button active" type="button" onClick={() => navigate("generator")}>
+              <KeyRound size={15} /> 返回首页
+            </button>
+          ) : null}
           <a
             className="github-badge ui-hidden-control"
             href="https://github.com/zhangkaihua88/chatgpt-business-price-radar"
@@ -359,7 +361,7 @@ export default function App() {
           <Info size={19} />
           <p>
             <strong>独立工具，非 OpenAI 官方产品。</strong>
-            价格数据来自公开配置；脚本仅在浏览器本地生成，不会由本站执行。实际价格、税费、付款资格与地区可用性以结账页为准。
+            价格数据来自公开配置；支付链接请求会在服务端转发到 ChatGPT 结账接口，本站不保存 Access Token。实际价格、税费、付款资格与地区可用性以结账页为准。
             <a href="https://help.openai.com/en/articles/8792536" target="_blank" rel="noreferrer">查看官方账单说明 <ArrowUpRight size={14} /></a>
           </p>
         </section>
@@ -474,10 +476,10 @@ function PriceTable({
                   type="button"
                   disabled={!isSupportedCheckoutCurrency(row.currencyCode)}
                   onClick={() => onGenerate(row)}
-                  aria-label={`为${row.countryName}生成脚本`}
-                  title={isSupportedCheckoutCurrency(row.currencyCode) ? "带入国家和货币生成脚本" : "该币种暂不支持脚本生成"}
+                  aria-label={`为${row.countryName}生成支付链接`}
+                  title={isSupportedCheckoutCurrency(row.currencyCode) ? "带入国家和货币生成支付链接" : "该币种暂不支持支付链接生成"}
                 >
-                  <Code2 size={14} /> 生成脚本
+                  <Code2 size={14} /> 生成支付链接
                 </button>
                 <a className="source-link" href={row.sourceUrl} target="_blank" rel="noreferrer" aria-label={`查看${row.countryName}官方价格源`}>
                   <ArrowUpRight size={16} />
@@ -522,8 +524,8 @@ function PriceCards({
               type="button"
               disabled={!isSupportedCheckoutCurrency(row.currencyCode)}
               onClick={() => onGenerate(row)}
-              aria-label={`为${row.countryName}生成脚本`}
-            ><Code2 size={14} /> 生成脚本</button>
+              aria-label={`为${row.countryName}生成支付链接`}
+            ><Code2 size={14} /> 生成支付链接</button>
             <a href={row.sourceUrl} target="_blank" rel="noreferrer">官方价格源 <ArrowUpRight size={15} /></a>
           </div>
         </article>

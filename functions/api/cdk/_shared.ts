@@ -24,6 +24,8 @@ export type CdkDatabase = {
 export type CdkEnv = {
   CDK_DB?: CdkDatabase;
   CDK_ADMIN_TOKEN?: string;
+  /** Secret used to mint short-lived, in-memory checkout activation grants. */
+  CDK_SESSION_SECRET?: string;
 };
 
 export type CdkContext = {
@@ -93,6 +95,64 @@ export function safeEqual(left: string, right: string): boolean {
   let difference = 0;
   for (let index = 0; index < a.length; index += 1) difference |= a[index] ^ b[index];
   return difference === 0;
+}
+
+function encodeBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function decodeBase64Url(value: string): Uint8Array | null {
+  try {
+    const normalized = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+    const binary = atob(normalized);
+    return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
+async function signActivationPayload(payload: string, secret: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+  return encodeBase64Url(new Uint8Array(signature));
+}
+
+/** Create a short-lived grant without putting the original CDK or token in the browser URL. */
+export async function createActivationToken(recordId: string, secret: string, ttlSeconds = 15 * 60): Promise<string> {
+  const payload = encodeBase64Url(new TextEncoder().encode(JSON.stringify({
+    sub: recordId,
+    exp: Math.floor(Date.now() / 1000) + ttlSeconds,
+  })));
+  return `${payload}.${await signActivationPayload(payload, secret)}`;
+}
+
+/** Verify a grant minted by createActivationToken. The token is intentionally stateless and short-lived. */
+export async function verifyActivationToken(token: string, secret: string): Promise<boolean> {
+  if (!token || !secret) return false;
+  const [payloadPart, signaturePart] = token.split(".");
+  if (!payloadPart || !signaturePart || token.length > 2048) return false;
+  const expected = await signActivationPayload(payloadPart, secret);
+  if (!safeEqual(expected, signaturePart)) return false;
+  const bytes = decodeBase64Url(payloadPart);
+  if (!bytes) return false;
+  try {
+    const payload = JSON.parse(new TextDecoder().decode(bytes)) as { sub?: unknown; exp?: unknown };
+    return typeof payload.sub === "string"
+      && payload.sub.length > 0
+      && typeof payload.exp === "number"
+      && Number.isFinite(payload.exp)
+      && payload.exp > Math.floor(Date.now() / 1000);
+  } catch {
+    return false;
+  }
 }
 
 export function requireAdmin(context: CdkContext): Response | null {
