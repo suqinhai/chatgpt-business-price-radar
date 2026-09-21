@@ -174,6 +174,34 @@ describe("server-side checkout endpoint", () => {
     expect(String(init.body)).toBe(JSON.stringify(payload));
   });
 
+  it("rejects a missing Business coupon before contacting the relay", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await invokeCheckout({
+      CHATGPT_RELAY_URL: RELAY_URL,
+      CHATGPT_RELAY_SECRET: RELAY_SECRET,
+    }, { coupon: "" });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ ok: false, error: "invalid_coupon" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing Access Token before contacting the relay", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await invokeCheckout({
+      CHATGPT_RELAY_URL: RELAY_URL,
+      CHATGPT_RELAY_SECRET: RELAY_SECRET,
+    }, { accessToken: "" });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ ok: false, error: "invalid_access_token" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it.each([
     [{ CHATGPT_RELAY_URL: RELAY_URL }, "secret is missing"],
     [{ CHATGPT_RELAY_SECRET: RELAY_SECRET }, "URL is missing"],
