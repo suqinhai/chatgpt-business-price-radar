@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import sample from "../public/data/sample-prices.json";
 import App from "./App";
 
-describe("pricing explorer", () => {
+describe("application routes", () => {
   beforeEach(() => {
     window.history.replaceState({}, "", "/");
     window.localStorage.clear();
@@ -18,73 +18,52 @@ describe("pricing explorer", () => {
     vi.unstubAllGlobals();
   });
 
-  it("loads the snapshot, preserves local prices and switches display currency locally", async () => {
-    const user = userEvent.setup();
+  it("uses the checkout generator as the only homepage", async () => {
     render(<App />);
 
-    expect((await screen.findAllByText("S$32.00")).length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "$ USD" })).toHaveAttribute("aria-pressed", "true");
-    expect((await screen.findAllByText("$23.80")).length).toBeGreaterThan(0);
-    await user.click(screen.getByRole("button", { name: "¥ CNY" }));
-    expect(screen.getByRole("button", { name: "¥ CNY" })).toHaveAttribute("aria-pressed", "true");
-    expect((await screen.findAllByText("¥161.93")).length).toBeGreaterThan(0);
-    expect((screen.getAllByText("S$32.00")).length).toBeGreaterThan(0);
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(await screen.findByRole("heading", { name: "Business 长链生成" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "价格雷达" })).not.toBeInTheDocument();
+    expect(screen.queryByText("一眼看懂，全球月付差多少。")).not.toBeInTheDocument();
+    expect(window.location.pathname).toBe("/");
   });
 
-  it("links to the project repository and honors a saved CNY preference", () => {
-    window.localStorage.setItem("business-price-radar:currency", "CNY");
+  it("serves the admin page only at /admin", async () => {
+    window.history.replaceState({}, "", "/admin");
     render(<App />);
 
-    expect(screen.getByRole("button", { name: "¥ CNY" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("link", { name: "在 GitHub 查看 zhangkaihua88/chatgpt-business-price-radar" }))
-      .toHaveAttribute("href", "https://github.com/zhangkaihua88/chatgpt-business-price-radar");
+    expect(await screen.findByRole("heading", { name: "CDK 管理台" })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/admin");
   });
 
-  it("filters by country and tax treatment", async () => {
-    const user = userEvent.setup();
+  it("canonicalizes the legacy admin query URL", async () => {
+    window.history.replaceState({}, "", "/?view=admin");
     render(<App />);
-    await screen.findAllByText("美国");
-    await user.type(screen.getByPlaceholderText("搜索国家、代码或币种"), "新加坡");
-    await waitFor(() => expect(screen.queryByText("德国")).not.toBeInTheDocument());
-    expect(screen.getAllByText("新加坡").length).toBeGreaterThan(0);
-    await user.clear(screen.getByPlaceholderText("搜索国家、代码或币种"));
-    await user.selectOptions(screen.getByLabelText("税费"), "inclusive");
-    expect(screen.getAllByText("德国").length).toBeGreaterThan(0);
-    expect(screen.queryByText("新加坡")).not.toBeInTheDocument();
+
+    expect(await screen.findByRole("heading", { name: "CDK 管理台" })).toBeInTheDocument();
+    await waitFor(() => expect(window.location.pathname).toBe("/admin"));
+    expect(window.location.search).toBe("");
   });
 
-  it("opens the generator with US and EGP defaults and responds to URL navigation", async () => {
-    const user = userEvent.setup();
+  it("hides legacy price and generator query routes behind the homepage", async () => {
+    window.history.replaceState({}, "", "/?view=prices");
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: /脚本生成器/ }));
+    expect(await screen.findByRole("heading", { name: "Business 长链生成" })).toBeInTheDocument();
+    await waitFor(() => expect(window.location.pathname).toBe("/"));
+    expect(window.location.search).toBe("");
+  });
+
+  it("responds to direct generator URL navigation with region defaults", async () => {
+    render(<App />);
+
     expect(screen.getByLabelText(/国家 ISO 缩写/)).toHaveValue("US");
     expect(screen.getByLabelText(/货币 ISO 缩写/)).toHaveValue("EGP");
-    expect(new URLSearchParams(window.location.search).get("view")).toBe("generator");
 
     window.history.pushState({}, "", "/?view=generator&country=JP&currency=JPY");
     window.dispatchEvent(new PopStateEvent("popstate"));
     await waitFor(() => expect(screen.getByLabelText(/国家 ISO 缩写/)).toHaveValue("JP"));
     expect(screen.getByLabelText(/货币 ISO 缩写/)).toHaveValue("JPY");
-  });
-
-  it("prefills a region from the radar and preserves the price filters on return", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-    await screen.findAllByText("新加坡");
-
-    const search = screen.getByPlaceholderText("搜索国家、代码或币种");
-    await user.type(search, "新加坡");
-    await user.click(screen.getAllByRole("button", { name: "为新加坡生成脚本" })[0]);
-
-    expect(screen.getByLabelText(/国家 ISO 缩写/)).toHaveValue("SG");
-    expect(screen.getByLabelText(/货币 ISO 缩写/)).toHaveValue("SGD");
-    expect(new URLSearchParams(window.location.search).get("country")).toBe("SG");
-    expect(new URLSearchParams(window.location.search).get("currency")).toBe("SGD");
-
-    await user.click(screen.getByRole("button", { name: /返回价格雷达/ }));
-    expect(screen.getByPlaceholderText("搜索国家、代码或币种")).toHaveValue("新加坡");
+    await waitFor(() => expect(window.location.pathname).toBe("/"));
   });
 
   it("blocks an empty coupon, then copies valid generated code without storing the coupon", async () => {
@@ -95,7 +74,6 @@ describe("pricing explorer", () => {
       value: { writeText },
     });
     render(<App />);
-    await user.click(screen.getByRole("button", { name: /脚本生成器/ }));
 
     const copyButton = screen.getByRole("button", { name: /复制代码/ });
     expect(copyButton).toHaveAttribute("aria-disabled", "true");
@@ -120,7 +98,6 @@ describe("pricing explorer", () => {
     Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
     render(<App />);
-    await user.click(screen.getByRole("button", { name: /脚本生成器/ }));
 
     await user.type(screen.getByPlaceholderText("例如：XXXXXXXXXXXX"), "SAVE20");
     await user.clear(screen.getByLabelText(/国家 ISO 缩写/));
@@ -143,7 +120,6 @@ describe("pricing explorer", () => {
       value: { writeText },
     });
     render(<App />);
-    await user.click(screen.getByRole("button", { name: /脚本生成器/ }));
 
     expect(screen.getByRole("radio", { name: /自动获取/ })).toBeChecked();
     await user.click(screen.getByRole("radio", { name: /手动粘贴/ }));
@@ -169,26 +145,10 @@ describe("pricing explorer", () => {
     expect(screen.getByPlaceholderText("粘贴 accessToken 或完整 Session JSON")).toHaveValue("");
   });
 
-  it("only exposes the Team generator and ignores removed tool routes", async () => {
-    const user = userEvent.setup();
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { writeText },
-    });
+  it("only exposes the Team generator", async () => {
     render(<App />);
-    await user.click(screen.getByRole("button", { name: /脚本生成器/ }));
     expect(screen.getByRole("tab", { name: /Team 优惠/ })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("tab", { name: /Codex 按量/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /账单查询/ })).not.toBeInTheDocument();
-
-    window.history.pushState({}, "", "/?view=generator&tool=codex");
-    window.dispatchEvent(new PopStateEvent("popstate"));
-    await waitFor(() => expect(screen.getByRole("tab", { name: /Team 优惠/ })).toHaveAttribute("aria-selected", "true"));
-    expect(screen.queryByPlaceholderText("填写空间名称")).not.toBeInTheDocument();
-
-    window.history.pushState({}, "", "/?view=generator&tool=billing");
-    window.dispatchEvent(new PopStateEvent("popstate"));
-    await waitFor(() => expect(screen.getByPlaceholderText("例如：XXXXXXXXXXXX")).toBeInTheDocument());
   });
 });

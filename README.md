@@ -1,6 +1,6 @@
 # Business Toolkit
 
-一个独立的 ChatGPT Business 价格与脚本工具箱。价格雷达从 `chatgpt.com` 的公开结账价格配置中读取 `currency_config.business.month`，保留官方原币价格并按公开汇率换算；脚本生成器在浏览器本地生成 Team 优惠、Codex 按量和账单查询脚本。
+一个独立的 ChatGPT Business 支付链接生成工具。首页提供 Team 优惠支付链接生成；管理员可在 `/admin` 管理 CDK。
 
 > 本项目不是 OpenAI 官方产品，与 OpenAI 没有隶属、合作或背书关系。实际价格、税费、付款资格和地区可用性以结账页为准。
 
@@ -57,13 +57,15 @@ npm run build
 
 采集请求不使用 Cookie、设备 ID、会话 ID、登录凭据或浏览器指纹头。
 
-## 脚本生成器
+## 页面与路由
 
-顶部导航可切换到脚本生成器，也可以从价格表或移动端价格卡片直接进入 Team 优惠工具。生成器内部通过 `tool=checkout|codex|billing` 切换工具；地区入口会预填国家和货币，优惠码、Token 和空间信息不会出现在网址中。
+- `/`：支付链接生成首页，包含地区价格选择、优惠码、Access Token 和 CDK 解锁流程。
+- `/admin`：CDK 管理页，支持批量生成、复制、查询状态和撤销。
+- 旧的 `?view=admin`、`?view=prices`、`?view=generator` 等链接会被规范化到上述两个页面，不再暴露其他工具路由。
 
-Team 优惠生成器默认使用 `US / EGP`、月付、两个席位和工作区名称 `xxx`；空间 UUID 留空时创建新空间。Codex 按量生成器默认使用空间名称 `work`、`13` Credit 和美国地区。
+Team 优惠生成器默认使用 `US / EGP`；已有空间 UUID 可选，优惠码和 Token 不会出现在网址中。
 
-三个工具都支持在脚本运行时从登录 Session 自动获取 Access Token，也可以手动粘贴原始 `accessToken` 或 `/api/auth/session` 返回的完整 JSON；完整 JSON 只会提取其中的 `accessToken` 写入脚本。切回自动获取时，手动输入会立即清空。
+生成脚本支持在运行时从登录 Session 自动获取 Access Token，也可以手动粘贴原始 `accessToken` 或 `/api/auth/session` 返回的完整 JSON；完整 JSON 只会提取其中的 `accessToken` 写入脚本。
 
 生成器只生成文本，不会在本站请求登录凭证、支付或账单接口，也不会代替用户执行代码。账单结果可能包含敏感付款资料，请勿分享控制台输出。请仅在有权操作的账号中使用，并以实际 ChatGPT 页面结果为准。
 

@@ -37,10 +37,10 @@ npx wrangler pages dev dist --d1 CDK_DB=<本地或远程数据库 ID>
 部署完成后，可以直接打开管理页面：
 
 ```text
-https://你的域名/?view=admin
+https://你的域名/admin
 ```
 
-输入设置在 Cloudflare Pages 中的 `CDK_ADMIN_TOKEN` 后，即可批量生成、复制、查看状态和撤销 CDK。管理员密钥只保存在当前页面内存中，不会写入 URL、Local Storage 或数据库。
+输入设置在 Cloudflare Pages 中的 `CDK_ADMIN_TOKEN` 后，即可批量生成、复制、查看状态和撤销 CDK。管理员密钥只保存在当前页面内存中，不会写入 URL、Local Storage 或数据库。旧的 `/?view=admin` 链接会自动跳转到 `/admin`。
 
 也可以通过命令行发放：
 

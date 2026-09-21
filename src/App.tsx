@@ -38,10 +38,11 @@ type AppView = "prices" | "generator" | "admin";
 type AppRoute = { view: AppView; tool: GeneratorTool; country: string; currency: string };
 
 function readRoute(): AppRoute {
+  const pathname = window.location.pathname.replace(/\/+$/, "") || "/";
   const params = new URLSearchParams(window.location.search);
-  const requestedView = params.get("view");
   return {
-    view: requestedView === "generator" || requestedView === "admin" ? requestedView : "prices",
+    // Keep the old query link working once, then canonicalize it to /admin.
+    view: pathname === "/admin" || (pathname === "/" && params.get("view") === "admin") ? "admin" : "generator",
     tool: "checkout",
     country: params.get("country")?.toUpperCase() || DEFAULT_CHECKOUT_COUNTRY,
     currency: params.get("currency")?.toUpperCase() || DEFAULT_CHECKOUT_CURRENCY,
@@ -99,6 +100,16 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const url = new URL(window.location.href);
+    const canonicalPath = route.view === "admin" ? "/admin" : "/";
+    if (url.pathname !== canonicalPath || url.search) {
+      url.pathname = canonicalPath;
+      url.search = "";
+      window.history.replaceState({}, "", url);
+    }
+  }, [route.view]);
+
+  useEffect(() => {
     const handlePopState = () => setRoute(readRoute());
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
@@ -140,27 +151,12 @@ export default function App() {
     tool: GeneratorTool = "checkout",
   ) => {
     const url = new URL(window.location.href);
-    if (nextView === "generator") {
-      url.searchParams.set("view", "generator");
-      url.searchParams.set("tool", tool);
-      if (row) {
-        url.searchParams.set("country", row.countryCode);
-        url.searchParams.set("currency", row.currencyCode);
-      } else {
-        url.searchParams.delete("country");
-        url.searchParams.delete("currency");
-      }
-    } else if (nextView === "admin") {
-      url.searchParams.set("view", "admin");
-      url.searchParams.delete("country");
-      url.searchParams.delete("currency");
-      url.searchParams.delete("tool");
+    if (nextView === "admin") {
+      url.pathname = "/admin";
     } else {
-      url.searchParams.delete("view");
-      url.searchParams.delete("country");
-      url.searchParams.delete("currency");
-      url.searchParams.delete("tool");
+      url.pathname = "/";
     }
+    url.search = "";
     window.history.pushState({}, "", url);
     setRoute(readRoute());
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -169,7 +165,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <button className="brand brand-button" type="button" onClick={() => navigate("prices")} aria-label="Business Toolkit 首页">
+        <button className="brand brand-button" type="button" onClick={() => navigate("generator")} aria-label="Business Toolkit 首页">
           <span className="brand-mark" aria-hidden="true">
             <span />
           </span>
@@ -178,21 +174,10 @@ export default function App() {
             <small>价格与结账工具</small>
           </span>
         </button>
-        <nav className="tool-navigation ui-hidden-control" aria-label="工具导航">
-          <button className={route.view === "prices" ? "active" : ""} type="button" onClick={() => navigate("prices")}>
-            <CircleDollarSign size={15} /> 价格雷达
-          </button>
-          <button className={route.view === "generator" ? "active" : ""} type="button" onClick={() => navigate("generator")}>
-            <Code2 size={15} /> 脚本生成器
-          </button>
-          <button className={route.view === "admin" ? "active" : ""} type="button" onClick={() => navigate("admin")}>
-            <KeyRound size={15} /> CDK 管理
-          </button>
-        </nav>
         <div className="topbar-actions">
           {route.view === "prices" ? <span className="source-pill"><span className="live-dot" /> OpenAI 公开配置</span> : null}
-          <button className={`admin-nav-button ${route.view === "admin" ? "active" : ""}`} type="button" onClick={() => navigate(route.view === "admin" ? "prices" : "admin")}>
-            <KeyRound size={15} /> {route.view === "admin" ? "返回价格雷达" : "CDK 管理"}
+          <button className={`admin-nav-button ${route.view === "admin" ? "active" : ""}`} type="button" onClick={() => navigate(route.view === "admin" ? "generator" : "admin")}>
+            <KeyRound size={15} /> {route.view === "admin" ? "返回首页" : "CDK 管理"}
           </button>
           <a
             className="github-badge ui-hidden-control"
@@ -385,11 +370,11 @@ export default function App() {
             initialCountry={route.country}
             initialCurrency={route.currency}
             countries={snapshot?.rows ?? []}
-            onBack={() => navigate("prices")}
+            onBack={() => navigate("generator")}
             onToolChange={(tool) => navigate("generator", undefined, tool)}
           />
         ) : (
-          <CdkAdmin onBack={() => navigate("prices")} />
+          <CdkAdmin onBack={() => navigate("generator")} />
         )}
       </main>
 
